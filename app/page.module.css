@@ -1,8 +1,11 @@
+/* No max-width/centering here, unlike the project-scoped pages
+   ([projectId], settings, editor) — this is the plugin's home screen, and
+   the platform's own Home (plugins/launcher) fills the shell's full content
+   width edge to edge. Matching that keeps the two "home" screens visually
+   consistent instead of this one looking narrower/inset. */
 .page {
   display: grid;
   gap: var(--sv-space-6);
-  margin-inline: auto;
-  max-width: 1040px;
 }
 
 .projectGrid {
