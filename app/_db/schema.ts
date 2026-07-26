@@ -69,6 +69,28 @@ export const plainwriteCredentials = sqliteTable(
   ],
 );
 
+/**
+ * One shared, owner-managed GitHub credential per project. Backed by a
+ * `scope: 'plugin'` sdk.secrets entry (readable by any user of this plugin,
+ * unlike the per-user `scope: 'user'` secrets behind `plainwriteCredentials`)
+ * so an owner can let invited members publish without connecting their own
+ * PAT. `resolveGitHubCredential` falls back to this row only when the
+ * current user has no working personal credential.
+ */
+export const plainwriteProjectCredentials = sqliteTable('plainwrite_project_credentials', {
+  tenantId: text('tenant_id').notNull(),
+  projectId: text('project_id').primaryKey(),
+  createdBy: text('created_by').notNull(),
+  provider: text('provider').notNull(),
+  authType: text('auth_type').notNull(),
+  secretRef: text('secret_ref').notNull(),
+  providerLogin: text('provider_login'),
+  status: text('status').notNull(),
+  lastError: text('last_error'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const plainwriteFileCache = sqliteTable(
   'plainwrite_file_cache',
   {
@@ -150,6 +172,7 @@ export const plainwriteTables = {
   plainwriteProjects,
   plainwriteProjectMembers,
   plainwriteCredentials,
+  plainwriteProjectCredentials,
   plainwriteFileCache,
   plainwriteDrafts,
   plainwriteCollectionSchemas,
@@ -159,6 +182,7 @@ export const plainwriteTables = {
 export type PlainwriteProject = InferSelectModel<typeof plainwriteProjects>;
 export type PlainwriteProjectMember = InferSelectModel<typeof plainwriteProjectMembers>;
 export type PlainwriteCredential = InferSelectModel<typeof plainwriteCredentials>;
+export type PlainwriteProjectCredential = InferSelectModel<typeof plainwriteProjectCredentials>;
 export type PlainwriteFileCacheEntry = InferSelectModel<typeof plainwriteFileCache>;
 export type PlainwriteDraft = InferSelectModel<typeof plainwriteDrafts>;
 export type PlainwriteCollectionSchema = InferSelectModel<typeof plainwriteCollectionSchemas>;
@@ -166,6 +190,7 @@ export type PlainwritePublishEvent = InferSelectModel<typeof plainwritePublishEv
 export type NewPlainwriteProject = InferInsertModel<typeof plainwriteProjects>;
 export type NewPlainwriteProjectMember = InferInsertModel<typeof plainwriteProjectMembers>;
 export type NewPlainwriteCredential = InferInsertModel<typeof plainwriteCredentials>;
+export type NewPlainwriteProjectCredential = InferInsertModel<typeof plainwriteProjectCredentials>;
 export type NewPlainwriteFileCacheEntry = InferInsertModel<typeof plainwriteFileCache>;
 export type NewPlainwriteDraft = InferInsertModel<typeof plainwriteDrafts>;
 export type NewPlainwriteCollectionSchema = InferInsertModel<typeof plainwriteCollectionSchemas>;

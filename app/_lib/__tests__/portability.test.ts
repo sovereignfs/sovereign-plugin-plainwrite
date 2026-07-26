@@ -76,6 +76,7 @@ interface Store extends Record<string, Row[]> {
   plainwrite_projects: Row[];
   plainwrite_project_members: Row[];
   plainwrite_credentials: Row[];
+  plainwrite_project_credentials: Row[];
   plainwrite_file_cache: Row[];
   plainwrite_drafts: Row[];
   plainwrite_collection_schemas: Row[];
@@ -86,6 +87,7 @@ let store: Store = {
   plainwrite_projects: [],
   plainwrite_project_members: [],
   plainwrite_credentials: [],
+  plainwrite_project_credentials: [],
   plainwrite_file_cache: [],
   plainwrite_drafts: [],
   plainwrite_collection_schemas: [],
@@ -97,6 +99,7 @@ function resetStore() {
     plainwrite_projects: [],
     plainwrite_project_members: [],
     plainwrite_credentials: [],
+    plainwrite_project_credentials: [],
     plainwrite_file_cache: [],
     plainwrite_drafts: [],
     plainwrite_collection_schemas: [],
@@ -441,6 +444,30 @@ describe('portability delete', () => {
     expect(store.plainwrite_credentials).toHaveLength(0);
     expect(store.plainwrite_drafts).toHaveLength(0);
     expect(result?.deleted).toBe(3); // 1 credential + 2 drafts
+  });
+
+  it("revokes a shared project credential the user created, even when the project itself survives", async () => {
+    const { registerPortabilityHandlers } = await import('../portability');
+    await registerPortabilityHandlers();
+
+    // Sole owner, but another member exists — project survives via
+    // ownership transfer. The departing owner's shared PAT must still be
+    // revoked so it can't keep publishing on their behalf afterward.
+    store.plainwrite_project_members = [
+      { tenantId: 't1', projectId: 'p1', userId: 'user-1', role: 'owner', joinedAt: 1 },
+      { tenantId: 't1', projectId: 'p1', userId: 'user-2', role: 'editor', joinedAt: 2 },
+    ];
+    store.plainwrite_projects = [{ id: 'p1', tenantId: 't1' }];
+    store.plainwrite_project_credentials = [
+      { tenantId: 't1', projectId: 'p1', createdBy: 'user-1', secretRef: 'shared-secret-1' },
+    ];
+
+    const result = await capturedDeleter.fn?.({ userId: 'user-1', tenantId: 't1', db: fakeDb });
+
+    expect(secretsDelete).toHaveBeenCalledWith('shared-secret-1');
+    expect(store.plainwrite_project_credentials).toHaveLength(0);
+    expect(store.plainwrite_projects).toHaveLength(1); // project survives via ownership transfer
+    expect(result?.deleted).toBeGreaterThanOrEqual(2); // membership transfer + shared credential
   });
 
   it('just removes membership for a project the user does not own', async () => {

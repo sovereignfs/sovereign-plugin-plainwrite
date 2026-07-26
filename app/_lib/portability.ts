@@ -14,6 +14,7 @@ import {
   plainwriteCredentials,
   plainwriteDrafts,
   plainwriteFileCache,
+  plainwriteProjectCredentials,
   plainwriteProjectMembers,
   plainwriteProjects,
   plainwritePublishEvents,
@@ -414,6 +415,38 @@ async function deletePlainwriteData(ctx: DeletionContext): Promise<DeletionResul
     .delete(plainwriteCredentials)
     .where(and(eq(plainwriteCredentials.tenantId, ctx.tenantId), eq(plainwriteCredentials.userId, ctx.userId)));
   deleted += credentials.length;
+
+  // A shared project credential the deleted user created (PLW-034) is that
+  // user's own PAT — it must not keep working for other members once the
+  // creator's account is gone, whether the project itself survives (another
+  // owner or a promoted member takes over) or is hard-deleted below.
+  const sharedCredentials = await db
+    .select({ projectId: plainwriteProjectCredentials.projectId, secretRef: plainwriteProjectCredentials.secretRef })
+    .from(plainwriteProjectCredentials)
+    .where(
+      and(
+        eq(plainwriteProjectCredentials.tenantId, ctx.tenantId),
+        eq(plainwriteProjectCredentials.createdBy, ctx.userId),
+      ),
+    );
+  for (const shared of sharedCredentials) {
+    if (shared.secretRef && !shared.secretRef.startsWith('revoked:')) {
+      try {
+        await sdk.secrets.delete(shared.secretRef);
+      } catch {
+        errors.push(`Could not revoke a vault secret for one project's shared connection.`);
+      }
+    }
+    await db
+      .delete(plainwriteProjectCredentials)
+      .where(
+        and(
+          eq(plainwriteProjectCredentials.tenantId, ctx.tenantId),
+          eq(plainwriteProjectCredentials.projectId, shared.projectId),
+        ),
+      );
+  }
+  deleted += sharedCredentials.length;
 
   const draftRows = await db
     .select({ id: plainwriteDrafts.id })

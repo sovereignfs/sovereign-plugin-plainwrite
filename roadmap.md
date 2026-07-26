@@ -1650,6 +1650,73 @@ status line — reported as confusing after a real end-to-end test.
 
 Verification: `pnpm typecheck` and `pnpm lint` pass on the changed file.
 
+### ✅ PLW-034 Shared Project Credential
+
+**Status:** ✅ Complete.
+
+Feedback from real use: inviting a non-technical person to a project meant
+they hit "Connect a GitHub token before publishing" immediately — a hard
+wall for someone who doesn't have (or want) a GitHub account. Adds an
+owner-managed shared credential any project member can fall back to.
+
+- [x] New isolated-DB table `plainwrite_project_credentials` (one row per
+  project, `createdBy`, `secretRef`, `providerLogin`, `status`,
+  `lastError`) — SQLite + Postgres migrations
+  (`0002_add_project_credentials.sql`).
+- [x] The shared token is stored via `sdk.secrets.create({ scope: 'plugin'
+  })` rather than the personal `scope: 'user'` secrets behind
+  `plainwrite_credentials` — a `'plugin'`-scoped secret is readable by any
+  authenticated user of the plugin at the platform layer
+  (`packages/db/src/platform-db.ts`'s `canAccessSecret`), so
+  Plainwrite's own project-membership check is what scopes it to "this
+  project's members," not a platform ACL.
+- [x] Owner-only `connectSharedGitHubPat`/`disconnectSharedGitHubCredential`
+  actions, mirroring `connectGitHubPat`/`disconnectGitHubCredential`'s
+  vault-rotation and tolerate-missing-secret behavior.
+- [x] `resolveGitHubCredential` now falls back to a connected shared
+  credential when the current user has no working personal one — a single
+  change point, so every existing publish/sync/upload/schema-inference
+  call site picked up the fallback for free (they only ever checked
+  `credential.token` truthiness).
+- [x] Settings page: a "Shared connection" panel (owner-only controls,
+  visible status to everyone) states plainly that publishes made this way
+  show up under the connecting owner's GitHub identity, not the actual
+  Sovereign user who clicked publish — the one real trade-off of sharing a
+  single PAT. A note in the personal "Publishing access" panel tells a
+  member relying on the shared connection that they don't need their own
+  token.
+- [x] The site list's `needsAttention` flag no longer nags a member to
+  reconnect their personal credential when a working shared credential
+  already covers the project.
+- [x] Departing-owner cleanup: `hardDeleteProject` now also revokes the
+  shared credential's vault secret, and `portability.ts`'s account-deletion
+  handler revokes any shared credential the deleted user created —
+  regardless of whether the project survives via ownership transfer — so a
+  departed owner's PAT can never keep working for other members.
+- [x] Added `actions-shared-credential.test.ts` (connect/disconnect,
+  owner-only enforcement, fallback precedence over a working personal
+  credential, no-fallback-to-a-disconnected-shared-credential) and a
+  `portability.test.ts` case for the departing-owner revocation path.
+- [x] Live-verified in the dev server: connected a real public repo,
+  confirmed the new "Shared connection" section renders with the
+  trade-off copy, confirmed a bad token surfaces the same error-boundary
+  behavior as the existing personal-PAT connect flow (no regression, no
+  partial write), and confirmed the People panel's invite flow still
+  works for adding a second member to test against.
+
+Acceptance criteria:
+
+- A project member with no personal GitHub credential can publish and see
+  private-repo content when the project has a connected shared credential.
+- Only project owners can connect, rotate, or disconnect the shared
+  credential.
+- A departed owner's shared credential is revoked, not left usable by
+  other members.
+
+Verification: `pnpm test` (plugin: 165/165), `pnpm typecheck`, `pnpm lint`,
+`pnpm format:check`, and a full `pnpm build` all pass. Live-verified in the
+dev server (see above).
+
 ## Future Backlog
 
 These items are intentionally outside v1.0 unless reprioritized.
