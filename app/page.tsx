@@ -1,8 +1,8 @@
 import Link from 'next/link';
-import { Card, EmptyState, PageHeader, StatusBadge } from '@sovereignfs/ui';
+import { Badge, Card, EmptyState, PageHeader, StatusBadge } from '@sovereignfs/ui';
 import { NewProjectDialog } from './_components/NewProjectDialog';
 import { listProjects, type ProjectListItem } from './_lib/actions';
-import { formatPipelineSummary, formatProjectRole } from './_lib/copy';
+import { formatPipelineSummary, formatProjectRole, formatSsgType } from './_lib/copy';
 import styles from './page.module.css';
 
 export default async function ProjectsPage() {
@@ -58,7 +58,7 @@ export default async function ProjectsPage() {
 function SiteCard({ project }: { project: ProjectListItem }) {
   return (
     <Link href={`/plainwrite/${project.id}`} className={styles.cardLink}>
-      <Card interactive className={styles.projectCard}>
+      <Card interactive padding="lg" className={styles.projectCard}>
         <div className={styles.cardHeader}>
           <h2>{project.name}</h2>
           <span
@@ -69,6 +69,10 @@ function SiteCard({ project }: { project: ProjectListItem }) {
         <p className={styles.projectMeta}>
           {project.repoOwner}/{project.repoName}
         </p>
+        {project.description ? <p className={styles.projectDescription}>{project.description}</p> : null}
+        <div className={styles.ssgRow}>
+          <Badge variant="mono">{formatSsgType(project.ssgType)}</Badge>
+        </div>
         {project.needsAttention ? (
           <p className={styles.attentionText}>Publishing access expired — reconnect</p>
         ) : (

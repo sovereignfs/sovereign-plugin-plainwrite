@@ -35,6 +35,16 @@ export function formatPostStatus(status: string): string {
 }
 
 /** One-line pipeline summary for a site card, e.g. "2 writing · 1 ready · 12 live". */
+const SSG_LABELS: Record<string, string> = {
+  astro: 'Astro',
+  jekyll: 'Jekyll',
+  custom: 'Custom',
+};
+
+export function formatSsgType(ssgType: string): string {
+  return SSG_LABELS[ssgType] ?? ssgType;
+}
+
 export function formatPipelineSummary(counts: {
   writingCount: number;
   readyCount: number;
