@@ -1,7 +1,12 @@
+/* No padding here — the runtime shell's own .content wrapper
+   (runtime/app/(platform)/shell.module.css) already pads every plugin's
+   route consistently (matches launcher, tasks, wallet, docs, etc., none of
+   which add their own outer padding). Adding padding here doubled up with
+   the shell's, pushing Plainwrite's pages further in than every other
+   plugin's "home" screen. */
 .content {
   min-width: 0;
   min-height: 100%;
-  padding: var(--sv-space-6);
   background: var(--sv-color-surface);
   overflow: auto;
 }
