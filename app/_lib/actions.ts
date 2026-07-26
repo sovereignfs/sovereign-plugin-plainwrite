@@ -73,6 +73,8 @@ export interface ProjectListItem extends ProjectSummary {
   liveCount: number;
   /** True when the current user's publishing credential needs reconnecting. */
   needsAttention: boolean;
+  /** True when the project owner has a working shared connection (PLW-034) turned on. */
+  hasSharedCredential: boolean;
 }
 
 interface ProjectMemberSummary extends PlainwriteProjectMember {
@@ -419,6 +421,7 @@ export async function listProjects(
         readyCount: readyByProject.get(project.id) ?? 0,
         liveCount: liveByProject.get(project.id) ?? 0,
         needsAttention: attentionProjectIds.has(project.id),
+        hasSharedCredential: workingSharedProjectIds.has(project.id),
       },
     ];
   });

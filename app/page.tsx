@@ -66,20 +66,29 @@ function SiteCard({ project }: { project: ProjectListItem }) {
             aria-hidden="true"
           />
         </div>
-        <p className={styles.projectMeta}>
-          {project.repoOwner}/{project.repoName}
-        </p>
-        {project.description ? <p className={styles.projectDescription}>{project.description}</p> : null}
-        <div className={styles.ssgRow}>
+
+        <div className={styles.cardMetaRow}>
+          <p className={styles.projectMeta}>
+            {project.repoOwner}/{project.repoName}
+          </p>
           <Badge variant="mono">{formatSsgType(project.ssgType)}</Badge>
         </div>
+
+        {project.description ? <p className={styles.projectDescription}>{project.description}</p> : null}
+
         {project.needsAttention ? (
           <p className={styles.attentionText}>Publishing access expired — reconnect</p>
         ) : (
           <p className={styles.pipelineText}>{formatPipelineSummary(project)}</p>
         )}
+
         <div className={styles.cardFooter}>
           <span>{formatProjectRole(project.currentUserRole)}</span>
+          {project.hasSharedCredential ? (
+            <Badge variant="status" status="active">
+              Shared connection
+            </Badge>
+          ) : null}
         </div>
       </Card>
     </Link>

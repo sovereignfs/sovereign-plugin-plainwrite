@@ -17,6 +17,7 @@ let membershipRows: Record<string, unknown>[] = [];
 let projectRows: Record<string, unknown>[] = [];
 let draftRows: Record<string, unknown>[] = [];
 let credentialRows: Record<string, unknown>[] = [];
+let sharedCredentialRows: Record<string, unknown>[] = [];
 let fileCacheRows: Record<string, unknown>[] = [];
 
 const fakeDb = {
@@ -36,6 +37,7 @@ const fakeDb = {
             if (tableName === 'plainwrite_project_members') return resolve(membershipRows);
             if (tableName === 'plainwrite_drafts') return resolve(draftRows);
             if (tableName === 'plainwrite_credentials') return resolve(credentialRows);
+            if (tableName === 'plainwrite_project_credentials') return resolve(sharedCredentialRows);
             if (tableName === 'plainwrite_file_cache') return resolve(fileCacheRows);
             resolve([]);
           },
@@ -84,6 +86,7 @@ beforeEach(() => {
     { projectId: 'project-1', status: 'committed', content: 'c' },
   ];
   credentialRows = [{ projectId: 'project-1', status: 'needs_reauth' }];
+  sharedCredentialRows = [];
   fileCacheRows = [
     { projectId: 'project-1' },
     { projectId: 'project-1' },
@@ -124,5 +127,33 @@ describe('listProjects — per-site pipeline counts and attention flag', () => {
     const result = await listProjects();
 
     expect(result).toEqual([]);
+  });
+
+  it('flags hasSharedCredential only for a project with a connected shared credential', async () => {
+    sharedCredentialRows = [
+      { projectId: 'project-1', status: 'connected' },
+      { projectId: 'project-2', status: 'disconnected' },
+    ];
+    const { listProjects } = await import('../actions');
+
+    const result = await listProjects();
+
+    expect(result.find((p) => p.id === 'project-1')).toMatchObject({ hasSharedCredential: true });
+    expect(result.find((p) => p.id === 'project-2')).toMatchObject({ hasSharedCredential: false });
+  });
+
+  it('suppresses needsAttention when a broken personal credential has a working shared fallback', async () => {
+    // project-1's personal credential is 'needs_reauth' (see beforeEach) —
+    // without a working shared credential that alone drives needsAttention
+    // (asserted above); a connected shared credential should suppress it.
+    sharedCredentialRows = [{ projectId: 'project-1', status: 'connected' }];
+    const { listProjects } = await import('../actions');
+
+    const result = await listProjects();
+
+    expect(result.find((p) => p.id === 'project-1')).toMatchObject({
+      needsAttention: false,
+      hasSharedCredential: true,
+    });
   });
 });
