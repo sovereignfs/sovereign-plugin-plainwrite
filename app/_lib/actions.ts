@@ -12,6 +12,7 @@ import {
   plainwriteCredentials,
   plainwriteDrafts,
   plainwriteFileCache,
+  plainwriteProjectCredentials,
   plainwriteProjectMembers,
   plainwriteProjects,
   plainwritePublishEvents,
@@ -20,6 +21,7 @@ import {
   type PlainwriteDraft,
   type PlainwriteFileCacheEntry,
   type PlainwriteProject,
+  type PlainwriteProjectCredential,
   type PlainwriteProjectMember,
 } from '../_db/schema';
 import { defaultMarkdownTemplate, type ContentFile } from './content-rules';
@@ -90,9 +92,30 @@ interface CredentialSummary {
   updatedAt: number;
 }
 
+interface SharedCredentialSummary {
+  provider: string;
+  authType: string;
+  providerLogin: string | null;
+  status: string;
+  lastError: string | null;
+  createdByUserId: string;
+  createdByDisplayName: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface ProjectDetail extends ProjectSummary {
   members: ProjectMemberSummary[];
   credential: CredentialSummary | null;
+  /** The project's shared credential, if the owner has enabled one — visible to every member. */
+  sharedCredential: SharedCredentialSummary | null;
+  /**
+   * Which credential the current user's own publish/sync actions would
+   * actually use right now: their own connected credential, the project's
+   * shared one as a fallback, or none. Drives the "publishing via the site
+   * owner's connection" UI indicator.
+   */
+  activeCredentialSource: 'personal' | 'shared' | 'none';
   /**
    * Set when the platform directory lookup for member display names/emails
    * failed — `members` still has real `userId`s but `displayName`/`email`
@@ -318,7 +341,7 @@ export async function listProjects(
   // Three batched queries (not per-project) so the site list stays a fixed
   // number of round trips regardless of how many projects the user belongs
   // to — feeds the "N writing · N ready · N live" summary on each site card.
-  const [draftRows, credentialRows, fileCacheRows] = await Promise.all([
+  const [draftRows, credentialRows, sharedCredentialRows, fileCacheRows] = await Promise.all([
     db
       .select()
       .from(plainwriteDrafts)
@@ -338,6 +361,15 @@ export async function listProjects(
           eq(plainwriteCredentials.tenantId, tenantId),
           eq(plainwriteCredentials.userId, userId),
           inArray(plainwriteCredentials.projectId, projectIds),
+        ),
+      ),
+    db
+      .select({ projectId: plainwriteProjectCredentials.projectId, status: plainwriteProjectCredentials.status })
+      .from(plainwriteProjectCredentials)
+      .where(
+        and(
+          eq(plainwriteProjectCredentials.tenantId, tenantId),
+          inArray(plainwriteProjectCredentials.projectId, projectIds),
         ),
       ),
     db
@@ -363,8 +395,17 @@ export async function listProjects(
   for (const row of fileCacheRows) {
     liveByProject.set(row.projectId, (liveByProject.get(row.projectId) ?? 0) + 1);
   }
+  // A project only needs the current user's attention when their own
+  // credential is broken AND there's no working shared connection to fall
+  // back on — otherwise their publishes still go through via the shared
+  // credential and nagging them to reconnect would be misleading.
+  const workingSharedProjectIds = new Set(
+    sharedCredentialRows.filter((row) => row.status === 'connected').map((row) => row.projectId),
+  );
   const attentionProjectIds = new Set(
-    credentialRows.filter((row) => row.status === 'needs_reauth').map((row) => row.projectId),
+    credentialRows
+      .filter((row) => row.status === 'needs_reauth' && !workingSharedProjectIds.has(row.projectId))
+      .map((row) => row.projectId),
   );
 
   return projects.flatMap((project): ProjectListItem[] => {
@@ -417,6 +458,18 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
   }
   const userById = new Map(directoryRows.map((user) => [user.id, user]));
   const credential = await getCredentialRow(db, tenantId, projectId, userId);
+  const sharedCredential = await getSharedCredentialRow(db, tenantId, projectId);
+
+  const hasWorkingPersonalCredential =
+    credential !== null &&
+    credential.status === 'connected' &&
+    (!credential.tokenExpiresAt || credential.tokenExpiresAt > now() + 60);
+  const hasWorkingSharedCredential = sharedCredential !== null && sharedCredential.status === 'connected';
+  const activeCredentialSource: ProjectDetail['activeCredentialSource'] = hasWorkingPersonalCredential
+    ? 'personal'
+    : hasWorkingSharedCredential
+      ? 'shared'
+      : 'none';
 
   return {
     ...project,
@@ -433,6 +486,20 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
           updatedAt: credential.updatedAt,
         }
       : null,
+    sharedCredential: sharedCredential
+      ? {
+          provider: sharedCredential.provider,
+          authType: sharedCredential.authType,
+          providerLogin: sharedCredential.providerLogin,
+          status: sharedCredential.status,
+          lastError: sharedCredential.lastError,
+          createdByUserId: sharedCredential.createdBy,
+          createdByDisplayName: userById.get(sharedCredential.createdBy)?.name ?? null,
+          createdAt: sharedCredential.createdAt,
+          updatedAt: sharedCredential.updatedAt,
+        }
+      : null,
+    activeCredentialSource,
     currentUserRole,
     directoryLookupFailed,
     members: memberRows.map((member) => {
@@ -1584,6 +1651,105 @@ export async function disconnectGitHubCredential(projectId: string) {
   revalidateProject(projectId);
 }
 
+/**
+ * Owner-only: connect (or rotate) the project's single shared GitHub PAT,
+ * so invited members can publish without connecting their own token
+ * (PLW-034). Stored as a `scope: 'plugin'` sdk.secrets entry — readable by
+ * any user of this plugin, unlike a personal `scope: 'user'` secret — so
+ * `resolveSharedCredential` can read it for whichever member is publishing.
+ * Commits made with it will show as this owner's GitHub identity for every
+ * member who relies on it; that trade-off is surfaced in the settings copy.
+ */
+export async function connectSharedGitHubPat(projectId: string, formData: FormData) {
+  const { db, userId, tenantId } = await getContext();
+  await requireProjectRole(db, tenantId, projectId, userId, 'owner');
+  const project = await getProjectRow(db, tenantId, projectId);
+  const token = formRawString(formData, 'token').trim();
+  if (!token) throw new Error('GitHub token is required.');
+
+  const existing = await getSharedCredentialRow(db, tenantId, projectId);
+  const provider = getGitProvider(project.provider);
+  const credentialMetadata = await provider.validatePat(token, project);
+  const secretLabel = `Plainwrite shared GitHub token for ${project.repoOwner}/${project.repoName}`;
+  let secretRef = existing?.secretRef && !existing.secretRef.startsWith('revoked:') ? existing.secretRef : null;
+  if (secretRef) {
+    await sdk.secrets.update(secretRef, token);
+  } else {
+    const secret = await sdk.secrets.create({
+      scope: 'plugin',
+      label: secretLabel,
+      value: token,
+      metadata: {
+        provider: 'github',
+        projectId,
+        repo: `${project.repoOwner}/${project.repoName}`,
+      },
+    });
+    secretRef = secret.id;
+  }
+
+  const ts = now();
+  const values = {
+    tenantId,
+    projectId,
+    createdBy: userId,
+    provider: 'github',
+    authType: 'pat',
+    secretRef,
+    providerLogin: credentialMetadata.login,
+    status: 'connected',
+    lastError: null,
+    createdAt: existing?.createdAt ?? ts,
+    updatedAt: ts,
+  };
+
+  if (existing) {
+    await db
+      .update(plainwriteProjectCredentials)
+      .set(values)
+      .where(
+        and(
+          eq(plainwriteProjectCredentials.tenantId, tenantId),
+          eq(plainwriteProjectCredentials.projectId, projectId),
+        ),
+      );
+  } else {
+    await db.insert(plainwriteProjectCredentials).values(values);
+  }
+
+  revalidateProject(projectId);
+}
+
+export async function disconnectSharedGitHubCredential(projectId: string) {
+  const { db, userId, tenantId } = await getContext();
+  await requireProjectRole(db, tenantId, projectId, userId, 'owner');
+  const existing = await getSharedCredentialRow(db, tenantId, projectId);
+  if (!existing) return;
+
+  try {
+    if (existing.secretRef && !existing.secretRef.startsWith('revoked:')) {
+      await sdk.secrets.delete(existing.secretRef);
+    }
+  } catch {
+    // Continue marking the credential disconnected even if the vault entry was already removed.
+  }
+  await db
+    .update(plainwriteProjectCredentials)
+    .set({
+      status: 'disconnected',
+      lastError: null,
+      updatedAt: now(),
+    })
+    .where(
+      and(
+        eq(plainwriteProjectCredentials.tenantId, tenantId),
+        eq(plainwriteProjectCredentials.projectId, projectId),
+      ),
+    );
+
+  revalidateProject(projectId);
+}
+
 export type RepositoryDetectionResult =
   | {
       ok: true;
@@ -1768,15 +1934,18 @@ export async function hardDeleteProject(projectId: string, formData: FormData) {
     .select({ secretRef: plainwriteCredentials.secretRef })
     .from(plainwriteCredentials)
     .where(and(eq(plainwriteCredentials.tenantId, tenantId), eq(plainwriteCredentials.projectId, projectId)));
+  const sharedCredential = await getSharedCredentialRow(db, tenantId, projectId);
   await Promise.all(
-    credentials.map(async (credential) => {
-      if (!credential.secretRef || credential.secretRef.startsWith('revoked:')) return;
-      try {
-        await sdk.secrets.delete(credential.secretRef);
-      } catch {
-        // Continue deleting plugin-owned rows even if the vault entry was already revoked.
-      }
-    }),
+    [...credentials, ...(sharedCredential ? [{ secretRef: sharedCredential.secretRef }] : [])].map(
+      async (credential) => {
+        if (!credential.secretRef || credential.secretRef.startsWith('revoked:')) return;
+        try {
+          await sdk.secrets.delete(credential.secretRef);
+        } catch {
+          // Continue deleting plugin-owned rows even if the vault entry was already revoked.
+        }
+      },
+    ),
   );
 
   await db
@@ -1794,6 +1963,14 @@ export async function hardDeleteProject(projectId: string, formData: FormData) {
   await db
     .delete(plainwriteCredentials)
     .where(and(eq(plainwriteCredentials.tenantId, tenantId), eq(plainwriteCredentials.projectId, projectId)));
+  await db
+    .delete(plainwriteProjectCredentials)
+    .where(
+      and(
+        eq(plainwriteProjectCredentials.tenantId, tenantId),
+        eq(plainwriteProjectCredentials.projectId, projectId),
+      ),
+    );
   await db
     .delete(plainwriteProjectMembers)
     .where(and(eq(plainwriteProjectMembers.tenantId, tenantId), eq(plainwriteProjectMembers.projectId, projectId)));
@@ -2001,15 +2178,65 @@ async function getCredentialRow(
   return rows[0] ?? null;
 }
 
+async function getSharedCredentialRow(
+  db: Db,
+  tenantId: string,
+  projectId: string,
+): Promise<PlainwriteProjectCredential | null> {
+  const rows = await db
+    .select()
+    .from(plainwriteProjectCredentials)
+    .where(
+      and(
+        eq(plainwriteProjectCredentials.tenantId, tenantId),
+        eq(plainwriteProjectCredentials.projectId, projectId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Resolves the GitHub credential a given user's publish/sync/read actions
+ * should use for a project: their own connected credential first, falling
+ * back to the project's shared owner-managed credential (PLW-034) when the
+ * user has none or theirs is disconnected. `source` is `null` only when
+ * nothing usable was found at all, so callers that don't care about the
+ * distinction can keep checking truthiness of `token` unchanged.
+ */
 async function resolveGitHubCredential(
   db: Db,
   tenantId: string,
   projectId: string,
   userId: string,
-): Promise<{ token: string | null; credential: PlainwriteCredential | null }> {
+): Promise<{
+  token: string | null;
+  credential: PlainwriteCredential | null;
+  source: 'personal' | 'shared' | null;
+}> {
   const credential = await getCredentialRow(db, tenantId, projectId, userId);
+  const personal = await resolvePersonalCredential(db, tenantId, projectId, userId, credential);
+  if (personal.token) {
+    return { token: personal.token, credential, source: 'personal' };
+  }
+
+  const shared = await resolveSharedCredential(db, tenantId, projectId);
+  if (shared) {
+    return { token: shared, credential, source: 'shared' };
+  }
+
+  return { token: null, credential, source: null };
+}
+
+async function resolvePersonalCredential(
+  db: Db,
+  tenantId: string,
+  projectId: string,
+  userId: string,
+  credential: PlainwriteCredential | null,
+): Promise<{ token: string | null }> {
   if (!credential || credential.status !== 'connected') {
-    return { token: null, credential };
+    return { token: null };
   }
   if (credential.tokenExpiresAt && credential.tokenExpiresAt <= now() + 60) {
     await markCredentialError(db, tenantId, projectId, userId, 'Credential token expired. Reconnect GitHub.');
@@ -2021,26 +2248,69 @@ async function resolveGitHubCredential(
         })
         .catch(() => undefined);
     }
-    return { token: null, credential };
+    return { token: null };
   }
   if (!credential.secretRef || credential.secretRef.startsWith('revoked:')) {
-    return { token: null, credential };
+    return { token: null };
   }
 
   try {
     const token = await sdk.secrets.get(credential.secretRef);
     if (!token) {
       await markCredentialError(db, tenantId, projectId, userId, 'Credential secret is missing.');
-      return { token: null, credential };
+      return { token: null };
     }
     if (credential.connectionId) {
       await sdk.connections.markUsed(credential.connectionId).catch(() => undefined);
     }
-    return { token, credential };
+    return { token };
   } catch {
     await markCredentialError(db, tenantId, projectId, userId, 'Credential secret could not be read.');
-    return { token: null, credential };
+    return { token: null };
   }
+}
+
+async function resolveSharedCredential(
+  db: Db,
+  tenantId: string,
+  projectId: string,
+): Promise<string | null> {
+  const shared = await getSharedCredentialRow(db, tenantId, projectId);
+  if (!shared || shared.status !== 'connected' || shared.secretRef.startsWith('revoked:')) {
+    return null;
+  }
+  try {
+    const token = await sdk.secrets.get(shared.secretRef);
+    if (!token) {
+      await markSharedCredentialError(db, tenantId, projectId, 'The shared connection secret is missing.');
+      return null;
+    }
+    return token;
+  } catch {
+    await markSharedCredentialError(db, tenantId, projectId, 'The shared connection secret could not be read.');
+    return null;
+  }
+}
+
+async function markSharedCredentialError(
+  db: Db,
+  tenantId: string,
+  projectId: string,
+  message: string,
+) {
+  await db
+    .update(plainwriteProjectCredentials)
+    .set({
+      status: 'needs_reauth',
+      lastError: message,
+      updatedAt: now(),
+    })
+    .where(
+      and(
+        eq(plainwriteProjectCredentials.tenantId, tenantId),
+        eq(plainwriteProjectCredentials.projectId, projectId),
+      ),
+    );
 }
 
 async function findGitHubProjectConnection(projectId: string) {

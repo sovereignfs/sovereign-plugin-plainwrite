@@ -3,7 +3,9 @@ import { Badge, Button, FormField, Input, PageHeader, Select, StatusBadge, Texta
 import {
   archiveProject,
   connectGitHubPat,
+  connectSharedGitHubPat,
   disconnectGitHubCredential,
+  disconnectSharedGitHubCredential,
   getGitHubOAuthStatus,
   getProject,
   hardDeleteProject,
@@ -149,6 +151,14 @@ export default async function ProjectSettingsPage({ params }: SettingsPageProps)
           </StatusBadge>
         </div>
 
+        {!project.credential && project.activeCredentialSource === 'shared' ? (
+          <p className={styles.helpText}>
+            You&apos;re publishing using {project.sharedCredential?.createdByDisplayName ?? 'the site owner'}
+            &apos;s shared connection below — you don&apos;t need to connect your own token unless you want
+            publishes to show up as you on GitHub.
+          </p>
+        ) : null}
+
         {project.credential ? (
           <dl className={styles.credentialDetails}>
             <div>
@@ -231,6 +241,81 @@ export default async function ProjectSettingsPage({ params }: SettingsPageProps)
           </div>
         ) : (
           <p className={styles.helpText}>Readers can&apos;t connect publishing access.</p>
+        )}
+      </section>
+
+      <section className={styles.panel} aria-labelledby="shared-credential">
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 id="shared-credential">Shared connection</h2>
+            <p className={styles.panelDescription}>
+              Let everyone on this site publish without connecting their own GitHub token —
+              handy for people who don&apos;t use GitHub day to day.
+            </p>
+          </div>
+          <StatusBadge status={project.sharedCredential?.status === 'connected' ? 'synced' : 'warning'}>
+            {project.sharedCredential?.status === 'connected' ? 'On' : 'Off'}
+          </StatusBadge>
+        </div>
+
+        {project.sharedCredential ? (
+          <dl className={styles.credentialDetails}>
+            <div>
+              <dt>Connected by</dt>
+              <dd>{project.sharedCredential.createdByDisplayName ?? project.sharedCredential.createdByUserId}</dd>
+            </div>
+            <div>
+              <dt>Account</dt>
+              <dd>{project.sharedCredential.providerLogin ?? 'Unknown'}</dd>
+            </div>
+            <div>
+              <dt>Last updated</dt>
+              <dd>{formatTimestamp(project.sharedCredential.updatedAt)}</dd>
+            </div>
+          </dl>
+        ) : null}
+
+        {project.sharedCredential?.lastError ? (
+          <p className={styles.errorText}>{project.sharedCredential.lastError}</p>
+        ) : null}
+
+        {userCanManage ? (
+          <div className={styles.credentialForms}>
+            <p className={styles.helpText}>
+              Posts published this way are committed under <strong>your</strong> GitHub account, no matter
+              who in Plainwrite actually clicked publish — so only turn this on with a token you&apos;re
+              comfortable sharing that way. Anyone can still connect their own token instead, under
+              Publishing access above.
+            </p>
+            <form action={connectSharedGitHubPat.bind(null, project.id)} className={styles.form}>
+              <FormField label="Personal access token to share">
+                {(field) => (
+                  <Input
+                    {...field}
+                    name="token"
+                    type="password"
+                    required
+                    autoComplete="off"
+                    placeholder="github_pat_..."
+                  />
+                )}
+              </FormField>
+              <Button type="submit">
+                {project.sharedCredential?.status === 'connected'
+                  ? 'Reconnect shared token'
+                  : 'Turn on shared connection'}
+              </Button>
+            </form>
+            {project.sharedCredential?.status === 'connected' ? (
+              <form action={disconnectSharedGitHubCredential.bind(null, project.id)}>
+                <Button type="submit" variant="secondary">
+                  Turn off shared connection
+                </Button>
+              </form>
+            ) : null}
+          </div>
+        ) : (
+          <p className={styles.helpText}>Only owners can turn the shared connection on or off.</p>
         )}
       </section>
 

@@ -111,3 +111,22 @@ value is never persisted in Plainwrite tables, exported, or rendered back to the
 client. Disconnecting a credential disconnects the platform connection or deletes
 the platform vault secret, then marks the Plainwrite credential metadata as
 disconnected without deleting project drafts.
+
+### Shared connection
+
+A project owner can optionally turn on a **shared connection** (**Project
+settings → Shared connection**) — a single GitHub token any member of the
+project can publish and sync with, without connecting their own. This is
+aimed at non-technical writers who don't have (or want) a GitHub account of
+their own. It's stored as a `scope: 'plugin'` `sdk.secrets` entry, readable by
+any user of the Plainwrite plugin, separate from the per-user `scope: 'user'`
+secrets behind personal credentials; only the project owner can turn it on,
+rotate it, or turn it off.
+
+A member's own connected credential always takes priority over the shared
+one when both exist. Because a shared token is one GitHub identity, every
+commit published through it — regardless of which Sovereign user clicked
+Publish — shows up on GitHub under the connecting owner's account; the
+settings page states this plainly before an owner turns it on. If the owner
+who connected it is later removed from Sovereign, the shared connection is
+automatically revoked rather than left dangling on a deleted account.
