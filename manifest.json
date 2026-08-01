@@ -67,7 +67,7 @@
       }
     ]
   },
-  "repository": "https://github.com/sovereignfs/sovereign-plainwrite",
+  "repository": "https://github.com/sovereignfs/sovereign-plugin-plainwrite",
   "compatibility": {
     "minPlatformVersion": "0.18.2"
   }
