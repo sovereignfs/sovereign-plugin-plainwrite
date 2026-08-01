@@ -76,7 +76,7 @@ The platform now has a clearer path for this proposal's open gaps:
 | `permissions`                      | `auth:session`, `db:readWrite`, `notifications:send`, `data:provide`, `data:export`, `data:import`, `activity:write` |
 | `data.provides`                    | `plainwrite.projects`, `plainwrite.content-index`, `plainwrite.drafts`                          |
 | `connections.providers`            | `git.github` in v0.1; `git.gitlab`, `git.gitea`, and custom self-hosted providers after v0.1     |
-| `repository`                       | `https://github.com/sovereignfs/sovereign-plainwrite`                                            |
+| `repository`                       | `https://github.com/sovereignfs/sovereign-plugin-plainwrite`                                            |
 | `compatibility.minPlatformVersion` | `0.18.2` — current platform baseline with `sdk.secrets`, `sdk.connections`, provider config, `sdk.data`, `sdk.directory`, portability, notifications, activity, and required UI primitives |
 
 `manifest.json`:
@@ -148,7 +148,7 @@ The platform now has a clearer path for this proposal's open gaps:
       }
     ]
   },
-  "repository": "https://github.com/sovereignfs/sovereign-plainwrite",
+  "repository": "https://github.com/sovereignfs/sovereign-plugin-plainwrite",
   "compatibility": {
     "minPlatformVersion": "0.18.2"
   }
