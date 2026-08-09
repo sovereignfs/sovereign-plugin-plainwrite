@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "fs.sovereign.plainwrite",
   "name": "Plainwrite",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "description": "A git-backed content editor for static site generators.",
   "type": "sovereign",
   "runtime": "native",
@@ -10,8 +10,7 @@
   "shell": "default",
   "icon": "icon.svg",
   "database": {
-    "isolation": "isolated",
-    "dialect": "sqlite"
+    "isolation": "isolated"
   },
   "permissions": [
     "auth:session",
