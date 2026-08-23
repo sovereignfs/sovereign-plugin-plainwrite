@@ -1,5 +1,15 @@
 import { notFound } from 'next/navigation';
-import { Badge, Button, FormField, Input, PageHeader, Select, StatusBadge, Textarea } from '@sovereignfs/ui';
+import {
+  Badge,
+  Button,
+  FormField,
+  Input,
+  PageContainer,
+  PageHeader,
+  Select,
+  StatusBadge,
+  Textarea,
+} from '@sovereignfs/ui';
 import {
   archiveProject,
   connectGitHubPat,
@@ -43,7 +53,7 @@ export default async function ProjectSettingsPage({ params }: SettingsPageProps)
   const userCanManage = canManageProject(project.currentUserRole);
 
   return (
-    <div className={styles.page}>
+    <PageContainer maxWidth="lg" className={styles.page}>
       <BackLink href={`/plainwrite/${projectId}`}>Back to posts</BackLink>
       <PageHeader
         title="Site settings"
@@ -496,7 +506,7 @@ export default async function ProjectSettingsPage({ params }: SettingsPageProps)
           </div>
         </section>
       ) : null}
-    </div>
+    </PageContainer>
   );
 }
 

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Badge, Card, EmptyState, PageHeader, StatusBadge } from '@sovereignfs/ui';
+import { Badge, Card, EmptyState, PageContainer, PageHeader, StatusBadge } from '@sovereignfs/ui';
 import { NewProjectDialog } from './_components/NewProjectDialog';
 import { listProjects, type ProjectListItem } from './_lib/actions';
 import { formatPipelineSummary, formatProjectRole, formatSsgType } from './_lib/copy';
@@ -13,7 +13,7 @@ export default async function ProjectsPage() {
   const archivedProjects = allProjects.filter((project) => project.archivedAt !== null);
 
   return (
-    <div className={styles.page}>
+    <PageContainer maxWidth="full" className={styles.page}>
       <PageHeader
         title="Your sites"
         description="Write and publish content for your sites."
@@ -51,7 +51,7 @@ export default async function ProjectsPage() {
           ))}
         </section>
       ) : null}
-    </div>
+    </PageContainer>
   );
 }
 

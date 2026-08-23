@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Button, NavTabs, PageHeader, StatusBadge } from '@sovereignfs/ui';
+import { Button, NavTabs, PageContainer, PageHeader, StatusBadge } from '@sovereignfs/ui';
 import {
   getProject,
   listContentFiles,
@@ -66,7 +66,7 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
   });
 
   return (
-    <div className={styles.page}>
+    <PageContainer maxWidth="lg" className={styles.page}>
       <BackLink href="/plainwrite">Back to sites</BackLink>
       <PageHeader
         title={project.name}
@@ -139,6 +139,6 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
           <p className={styles.emptyText}>No posts in this stage.</p>
         )}
       </section>
-    </div>
+    </PageContainer>
   );
 }
