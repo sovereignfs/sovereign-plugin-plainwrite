@@ -3,8 +3,14 @@
    the platform's own Home (plugins/launcher) fills the shell's full content
    width edge to edge. Matching that keeps the two "home" screens visually
    consistent instead of this one looking narrower/inset. */
+/* minmax(0, 1fr), not the bare implicit column a plain `display: grid` gets
+   (which sizes to its content's max-content width) — without it, a wide
+   flex-row child (PageHeader's mobile row, whose action button has
+   flex-shrink: 0) forces the single column wider than the viewport instead
+   of shrinking to fit, blowing the whole page out horizontally on mobile. */
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-6);
 }
 
@@ -19,8 +25,14 @@
   text-decoration: none;
 }
 
+/* minmax(0, 1fr) — see .page's comment above; this grid nests inside
+   .projectGrid's own auto-fill track, and without it the card's flex-row
+   children (.cardMetaRow, .cardFooter) blow the card past the track's
+   computed width instead of shrinking their own nowrap/ellipsis content
+   to fit. */
 .projectCard {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-2);
 }
 

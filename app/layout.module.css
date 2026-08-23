@@ -1,9 +1,7 @@
-/* No padding here — the runtime shell's own .content wrapper
-   (runtime/app/(platform)/shell.module.css) already pads every plugin's
-   route consistently (matches launcher, tasks, wallet, docs, etc., none of
-   which add their own outer padding). Adding padding here doubled up with
-   the shell's, pushing Plainwrite's pages further in than every other
-   plugin's "home" screen. */
+/* No padding here — the runtime shell applies no gutter of its own since
+   task 9.25; each page supplies its own via @sovereignfs/ui's PageContainer
+   instead (see layout.tsx's doc comment). Adding padding here too would
+   double up with each page's own PageContainer padding. */
 .content {
   min-width: 0;
   min-height: 100%;

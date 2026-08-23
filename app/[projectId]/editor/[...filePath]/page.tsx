@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { PageHeader } from '@sovereignfs/ui';
+import { PageContainer, PageHeader } from '@sovereignfs/ui';
 import { BackLink } from '../../../_components/BackLink';
 import { MarkdownEditor } from '../../../_components/MarkdownEditor';
 import {
@@ -41,7 +41,7 @@ export default async function EditorPage({ params, searchParams }: EditorPagePro
     typeof frontmatterTitle === 'string' && frontmatterTitle.trim() ? frontmatterTitle : path;
 
   return (
-    <div className={styles.page}>
+    <PageContainer maxWidth="lg" className={styles.page}>
       <BackLink href={`/plainwrite/${projectId}`}>Back to posts</BackLink>
       <PageHeader
         title={displayTitle}
@@ -76,6 +76,6 @@ export default async function EditorPage({ params, searchParams }: EditorPagePro
           uploadImageAction={uploadProjectImage.bind(null, projectId, null)}
         />
       )}
-    </div>
+    </PageContainer>
   );
 }

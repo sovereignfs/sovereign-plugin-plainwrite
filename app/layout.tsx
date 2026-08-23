@@ -18,7 +18,10 @@ export default async function PlainwriteLayout({ children }: { children: ReactNo
 
   // No plugin-local sidebar: the runtime shell already provides the top-level
   // app rail, and per-screen back navigation is a plain breadcrumb (BackLink)
-  // rather than a persistent second side rail. Each page owns its own
-  // max-width and centering.
+  // rather than a persistent second side rail. The shell applies no gutter of
+  // its own (task 9.25) — each page wraps itself in @sovereignfs/ui's
+  // PageContainer for its own padding/max-width, since pages need different
+  // widths (the home screen is full-bleed, project/settings/editor screens
+  // are narrower reading columns).
   return <main className={styles.content}>{children}</main>;
 }

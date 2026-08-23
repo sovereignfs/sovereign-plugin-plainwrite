@@ -1,8 +1,12 @@
+/* minmax(0, 1fr), not the bare implicit column a plain `display: grid` gets
+   (which sizes to its content's max-content width) — without it, a wide
+   flex-row child (PageHeader's mobile row, or NavTabs' flex-wrap row) can
+   force the single column wider than the viewport instead of shrinking to
+   fit, blowing the whole page out horizontally on mobile. */
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-6);
-  margin-inline: auto;
-  max-width: 1040px;
 }
 
 .cardHeader {
@@ -63,6 +67,7 @@
 
 .contentPanel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-4);
   border: 1px solid var(--sv-color-border);
   border-radius: var(--sv-radius-md);
