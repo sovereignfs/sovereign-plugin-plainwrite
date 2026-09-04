@@ -37,21 +37,64 @@ export function parseMarkdownDocument(content: string): MarkdownDocument {
 }
 
 /**
+ * True for a Date carrying no time-of-day at all in UTC — which is exactly
+ * what js-yaml produces for a date-only YAML scalar (`pubDate: 2024-07-15`
+ * parses to 2024-07-15T00:00:00.000Z). A value with a real time component
+ * is a genuine timestamp and must keep it.
+ */
+function isDateOnly(value: unknown): value is Date {
+  return (
+    value instanceof Date &&
+    !Number.isNaN(value.getTime()) &&
+    value.getUTCHours() === 0 &&
+    value.getUTCMinutes() === 0 &&
+    value.getUTCSeconds() === 0 &&
+    value.getUTCMilliseconds() === 0
+  );
+}
+
+/**
  * Serializes a structured-field data object back into raw YAML text (no
  * `---` fences) for the raw-YAML source of truth. Preserves any keys not
  * covered by the collection schema — structured-mode editing only touches
  * schema-known fields, so unrecognized frontmatter must round-trip
  * unchanged rather than being silently dropped.
+ *
+ * Date-only values are written back as bare `YYYY-MM-DD`, not as the full
+ * ISO instant js-yaml dumps for a Date. Without this, opening a post and
+ * editing *any* field rewrote every date in the file from `2024-07-15` to
+ * `2024-07-15T00:00:00.000Z` — a silent reformat of content the writer
+ * never touched, which trips SSG frontmatter schemas that pin a date-only
+ * shape and shows up as spurious diff noise in the repository.
+ *
+ * The substitution goes through a placeholder token rather than a regex
+ * over the dumped YAML: js-yaml emits the token unquoted (it is a plain
+ * alphanumeric scalar), so the swap is an exact, unambiguous string
+ * replace that cannot accidentally match a date inside a multi-line string
+ * or a user's prose.
  */
 export function serializeStructuredFrontmatter(data: Record<string, unknown>): string {
   const entries = Object.entries(data).filter(([, value]) => value !== undefined);
   if (entries.length === 0) return '';
-  const doc = matter.stringify('', Object.fromEntries(entries));
+
+  const dateTokens = new Map<string, string>();
+  const prepared = entries.map(([key, value]) => {
+    if (!isDateOnly(value)) return [key, value] as const;
+    const token = `SvPlainwriteDateToken${dateTokens.size}Zz`;
+    dateTokens.set(token, value.toISOString().slice(0, 10));
+    return [key, token] as const;
+  });
+
+  const doc = matter.stringify('', Object.fromEntries(prepared));
   // See parseMarkdownDocument's comment: the `{}` disables gray-matter's
   // broken same-content cache, which otherwise returns a stale/empty result
   // on a second call with identical stringified frontmatter (e.g. saving
   // the same field values twice, or two new posts with the same title).
-  return (matter(doc, {}).matter ?? '').trim();
+  let yaml = (matter(doc, {}).matter ?? '').trim();
+  for (const [token, text] of dateTokens) {
+    yaml = yaml.replace(token, text);
+  }
+  return yaml;
 }
 
 export function serializeMarkdownDocument(frontmatterYaml: string, body: string) {
@@ -74,11 +117,18 @@ export function defaultFrontmatterYaml(filePath: string, title?: string) {
 }
 
 export function defaultMarkdownTemplate(filePath: string, title?: string) {
-  return serializeMarkdownDocument(defaultFrontmatterYaml(filePath, title), 'Start writing here.\n');
+  return serializeMarkdownDocument(
+    defaultFrontmatterYaml(filePath, title),
+    'Start writing here.\n',
+  );
 }
 
 export function titleFromPath(filePath: string) {
-  const filename = filePath.split('/').at(-1)?.replace(/\.(mdx?|MDX?)$/, '') ?? 'untitled';
+  const filename =
+    filePath
+      .split('/')
+      .at(-1)
+      ?.replace(/\.(mdx?|MDX?)$/, '') ?? 'untitled';
   const title = filename
     .split(/[-_\s]+/)
     .filter(Boolean)

@@ -123,6 +123,56 @@ describe('editor rules', () => {
     expect(slugifyFilename('')).toBe('untitled.md');
   });
 
+  // A date-only YAML scalar parses to a JS Date, and js-yaml dumps a Date as
+  // a full ISO instant — so before this was handled, editing any *other*
+  // field silently rewrote `2024-07-15` to `2024-07-15T00:00:00.000Z` in a
+  // file the writer never touched that field in.
+  it('keeps a date-only frontmatter value in YYYY-MM-DD form', () => {
+    const { data } = parseMarkdownDocument('---\ntitle: Hello\npubDate: 2024-07-15\n---\n\nBody');
+
+    const yaml = serializeStructuredFrontmatter({ ...data, title: 'Edited title' });
+
+    expect(yaml).toContain('pubDate: 2024-07-15');
+    expect(yaml).not.toContain('T00:00:00');
+  });
+
+  it('round-trips a date-only value unchanged across repeated serializations', () => {
+    const first = serializeStructuredFrontmatter(
+      parseMarkdownDocument('---\npubDate: 2024-07-15\n---\n\nBody').data,
+    );
+    const second = serializeStructuredFrontmatter(
+      parseMarkdownDocument(`---\n${first}\n---\n\nBody`).data,
+    );
+
+    expect(second).toBe(first);
+    expect(second).toBe('pubDate: 2024-07-15');
+  });
+
+  it('preserves the time component of a genuine timestamp', () => {
+    const { data } = parseMarkdownDocument('---\npubDate: 2024-07-15T10:30:00Z\n---\n\nBody');
+
+    expect(serializeStructuredFrontmatter(data)).toContain('2024-07-15T10:30:00.000Z');
+  });
+
+  // The date picker hands back a UTC-midnight Date, so the value serializes
+  // as an unquoted YAML timestamp. A quoted '2024-07-15' would change the
+  // field's type from timestamp to string and fail a strict SSG date schema.
+  it('serializes a picked date as an unquoted YAML timestamp', () => {
+    const yaml = serializeStructuredFrontmatter({
+      pubDate: new Date('2024-07-15T00:00:00.000Z'),
+    });
+
+    expect(yaml).toBe('pubDate: 2024-07-15');
+    expect(parseMarkdownDocument(`---\n${yaml}\n---\n\nBody`).data.pubDate).toBeInstanceOf(Date);
+  });
+
+  it('leaves a string field that merely looks like a date quoted', () => {
+    const yaml = serializeStructuredFrontmatter({ version: '2024-07-15' });
+
+    expect(yaml).toBe("version: '2024-07-15'");
+    expect(typeof parseMarkdownDocument(`---\n${yaml}\n---\n\nBody`).data.version).toBe('string');
+  });
+
   it('escapes raw HTML and MDX-like content in previews', () => {
     const preview = renderSafeMarkdownPreview(
       '---\ntitle: Unsafe\n---\n\n# Hello\n<script>alert(1)</script>\n<Component />',
