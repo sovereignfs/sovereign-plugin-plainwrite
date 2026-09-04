@@ -5,6 +5,7 @@ import {
   canManageProject,
   defaultMetadataVisibility,
   hasProjectRole,
+  normalizeImageUploadPath,
   normalizePathPrefix,
   parseGitHubRepositoryUrl,
   projectInputDefaults,
@@ -12,12 +13,12 @@ import {
 
 describe('parseGitHubRepositoryUrl', () => {
   it('parses HTTPS GitHub repository URLs', () => {
-    expect(parseGitHubRepositoryUrl('https://github.com/sovereignfs/sovereignfs-plainwrite')).toEqual(
-      {
-        owner: 'sovereignfs',
-        name: 'sovereignfs-plainwrite',
-      },
-    );
+    expect(
+      parseGitHubRepositoryUrl('https://github.com/sovereignfs/sovereignfs-plainwrite'),
+    ).toEqual({
+      owner: 'sovereignfs',
+      name: 'sovereignfs-plainwrite',
+    });
   });
 
   it('parses SSH GitHub repository URLs', () => {
@@ -51,6 +52,24 @@ describe('project defaults', () => {
   it('treats "." as an explicit repository-root convention', () => {
     expect(normalizePathPrefix('.')).toBe('');
     expect(normalizePathPrefix(' . ')).toBe('');
+  });
+
+  // These prefixes are interpolated into a GitHub contents API URL, where
+  // `..` survives encodeURIComponent and is then resolved away by URL
+  // parsing — retargeting the write at another repository.
+  it('strips traversal segments from path prefixes', () => {
+    expect(normalizePathPrefix('../../../etc')).toBe('etc');
+    expect(normalizePathPrefix('src/../content')).toBe('src/content');
+    expect(normalizePathPrefix('../..')).toBe('src/content');
+  });
+
+  it('strips traversal segments from image upload paths', () => {
+    expect(normalizeImageUploadPath('../../../../repos/attacker/evil/contents')).toBe(
+      'repos/attacker/evil/contents',
+    );
+    expect(normalizeImageUploadPath('public/../images')).toBe('public/images');
+    expect(normalizeImageUploadPath('..')).toBe('public/images');
+    expect(normalizeImageUploadPath('public//images')).toBe('public/images');
   });
 
   it('accepts jekyll as a supported SSG type', () => {

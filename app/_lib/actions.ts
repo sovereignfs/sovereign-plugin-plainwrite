@@ -34,7 +34,11 @@ import {
   GitProviderError,
   type GitPublishResult,
 } from './git-providers';
-import { buildImageReferenceUrl, buildImageUploadFilePath, validateProjectImage } from './image-rules';
+import {
+  buildImageReferenceUrl,
+  buildImageUploadFilePath,
+  validateProjectImage,
+} from './image-rules';
 import { buildGitHubOAuthUrl, exchangeGitHubOAuthCode } from './oauth-rules';
 import { notifyUser, recordActivity } from './platform-events';
 import {
@@ -160,7 +164,10 @@ interface ContentFileListResult {
 }
 
 interface EditorState {
-  project: Pick<PlainwriteProject, 'id' | 'name' | 'repoOwner' | 'repoName' | 'branch' | 'pathPrefix'>;
+  project: Pick<
+    PlainwriteProject,
+    'id' | 'name' | 'repoOwner' | 'repoName' | 'branch' | 'pathPrefix'
+  >;
   path: string;
   content: string;
   baseSha: string | null;
@@ -290,7 +297,22 @@ async function requireProjectRole(
  * through Plainwrite even though the UI only ever lists `pathPrefix`-scoped
  * content — defeating the project's own scoping model and audit trail.
  */
-function assertContentPathAllowed(project: PlainwriteProject, path: string) {
+/**
+ * Rejects any repository-relative path that could resolve outside the
+ * repository it is written to.
+ *
+ * Load-bearing beyond ordinary input hygiene: these paths are interpolated
+ * into a GitHub contents API URL, and `..` survives `encodeURIComponent`
+ * untouched (dots are unreserved). WHATWG URL parsing then collapses the dot
+ * segments before the request goes out, so `../../../../repos/other/repo/
+ * contents/x` retargets the write at an entirely different repository while
+ * the action still reports success.
+ *
+ * Split out from `assertContentPathAllowed` so the image upload path — which
+ * is deliberately outside the content path prefix and so cannot use the
+ * adapter check — still gets the same traversal guard.
+ */
+function assertSafeRepositoryPath(path: string) {
   const segments = path.split('/');
   const hasTraversal = segments.some(
     (segment) => segment === '' || segment === '.' || segment === '..',
@@ -298,6 +320,10 @@ function assertContentPathAllowed(project: PlainwriteProject, path: string) {
   if (!path || path.startsWith('/') || path.includes('\\') || hasTraversal) {
     throw new Error('Invalid file path.');
   }
+}
+
+function assertContentPathAllowed(project: PlainwriteProject, path: string) {
+  assertSafeRepositoryPath(path);
 
   const adapter = getSsgAdapter(project.ssgType);
   if (!adapter.isPathAllowed(path, project.pathPrefix)) {
@@ -366,7 +392,10 @@ export async function listProjects(
         ),
       ),
     db
-      .select({ projectId: plainwriteProjectCredentials.projectId, status: plainwriteProjectCredentials.status })
+      .select({
+        projectId: plainwriteProjectCredentials.projectId,
+        status: plainwriteProjectCredentials.status,
+      })
       .from(plainwriteProjectCredentials)
       .where(
         and(
@@ -467,12 +496,10 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
     credential !== null &&
     credential.status === 'connected' &&
     (!credential.tokenExpiresAt || credential.tokenExpiresAt > now() + 60);
-  const hasWorkingSharedCredential = sharedCredential !== null && sharedCredential.status === 'connected';
-  const activeCredentialSource: ProjectDetail['activeCredentialSource'] = hasWorkingPersonalCredential
-    ? 'personal'
-    : hasWorkingSharedCredential
-      ? 'shared'
-      : 'none';
+  const hasWorkingSharedCredential =
+    sharedCredential !== null && sharedCredential.status === 'connected';
+  const activeCredentialSource: ProjectDetail['activeCredentialSource'] =
+    hasWorkingPersonalCredential ? 'personal' : hasWorkingSharedCredential ? 'shared' : 'none';
 
   return {
     ...project,
@@ -765,7 +792,11 @@ export async function getEditorState(
     .orderBy(desc(plainwriteDrafts.updatedAt))
     .limit(1);
   const draft = draftRows[0];
-  if (draft && draft.content !== null && (draft.status === 'draft' || draft.status === 'committed')) {
+  if (
+    draft &&
+    draft.content !== null &&
+    (draft.status === 'draft' || draft.status === 'committed')
+  ) {
     return {
       project,
       path,
@@ -872,7 +903,11 @@ export async function createContentFile(projectId: string, formData: FormData) {
   if (!filename) throw new Error('Filename is required.');
   const title = formString(formData, 'title');
 
-  const path = buildContentFilePath(project.pathPrefix, formString(formData, 'collection'), filename);
+  const path = buildContentFilePath(
+    project.pathPrefix,
+    formString(formData, 'collection'),
+    filename,
+  );
   // The title carries through as a query param (read once by the editor
   // page on this first load, never persisted) so the new post's frontmatter
   // seeds with what the writer actually typed instead of reverse-engineering
@@ -916,9 +951,11 @@ export async function publishCommittedDraft(
 
   try {
     if (force) {
-      const remote = await provider.getFileContent(project, path, { token: credential.token }).catch(
-        (error) => (error instanceof GitProviderError && error.notFound ? null : Promise.reject(error)),
-      );
+      const remote = await provider
+        .getFileContent(project, path, { token: credential.token })
+        .catch((error) =>
+          error instanceof GitProviderError && error.notFound ? null : Promise.reject(error),
+        );
       baseSha = remote?.sha ?? null;
     } else {
       await assertNoPublishConflict(provider, project, credential.token, path, draft);
@@ -1027,6 +1064,20 @@ export async function uploadProjectImage(
     validation.extension,
     randomUUID().slice(0, 8),
   );
+  // Defence in depth behind `normalizeImageUploadPath`, which already strips
+  // traversal segments on write: a project row persisted before that
+  // normalization existed can still hold a `..` prefix, and the assembled
+  // path must never be able to escape the repository. Surfaced inline rather
+  // than thrown so a stale setting reads as a fixable error on the upload
+  // rather than replacing the editor with the error boundary.
+  try {
+    assertSafeRepositoryPath(path);
+  } catch {
+    return {
+      ok: false,
+      error: 'The image upload path for this site is invalid. Update it in site settings.',
+    };
+  }
   const message = `Upload image ${path.split('/').at(-1) ?? path}`;
   const provider = getGitProvider(project.provider);
 
@@ -1252,7 +1303,8 @@ export async function publishAllCommittedDrafts(
   revalidateProject(projectId);
   return {
     ok: true,
-    message: conflicts.length > 0 ? `Published, skipping conflicts: ${conflicts.join('; ')}` : undefined,
+    message:
+      conflicts.length > 0 ? `Published, skipping conflicts: ${conflicts.join('; ')}` : undefined,
   };
 }
 
@@ -1308,7 +1360,11 @@ export async function stageContentDeletion(projectId: string, path: string) {
   revalidateProject(projectId);
 }
 
-export async function updateCollectionSchema(projectId: string, collection: string, formData: FormData) {
+export async function updateCollectionSchema(
+  projectId: string,
+  collection: string,
+  formData: FormData,
+) {
   const { db, userId, tenantId } = await getContext();
   await requireProjectRole(db, tenantId, projectId, userId, 'owner');
   const fields = schemaFieldsFromForm(formData);
@@ -1518,7 +1574,8 @@ export async function completeGitHubOAuthCallback(input: {
 }): Promise<string> {
   const { db, userId, tenantId } = await getContext();
   const state = await sdk.connections.verifyOAuthState(input.state);
-  if (state.provider !== 'git.github') throw new Error('OAuth state provider did not match GitHub.');
+  if (state.provider !== 'git.github')
+    throw new Error('OAuth state provider did not match GitHub.');
   const projectId = typeof state.metadata?.projectId === 'string' ? state.metadata.projectId : null;
   if (!projectId) throw new Error('OAuth state did not include a Plainwrite project.');
 
@@ -1674,7 +1731,8 @@ export async function connectSharedGitHubPat(projectId: string, formData: FormDa
   const provider = getGitProvider(project.provider);
   const credentialMetadata = await provider.validatePat(token, project);
   const secretLabel = `Plainwrite shared GitHub token for ${project.repoOwner}/${project.repoName}`;
-  let secretRef = existing?.secretRef && !existing.secretRef.startsWith('revoked:') ? existing.secretRef : null;
+  let secretRef =
+    existing?.secretRef && !existing.secretRef.startsWith('revoked:') ? existing.secretRef : null;
   if (secretRef) {
     await sdk.secrets.update(secretRef, token);
   } else {
@@ -1788,9 +1846,11 @@ export async function detectRepository(repositoryUrl: string): Promise<Repositor
     };
   }
 
-  const entries = await detectGitHubRepositoryFiles(repo.owner, repo.name, info.defaultBranch).catch(
-    () => [],
-  );
+  const entries = await detectGitHubRepositoryFiles(
+    repo.owner,
+    repo.name,
+    info.defaultBranch,
+  ).catch(() => []);
   const pathPrefix = suggestPathPrefix(entries) ?? 'src/content';
 
   return {
@@ -1936,7 +1996,12 @@ export async function hardDeleteProject(projectId: string, formData: FormData) {
   const credentials = await db
     .select({ secretRef: plainwriteCredentials.secretRef })
     .from(plainwriteCredentials)
-    .where(and(eq(plainwriteCredentials.tenantId, tenantId), eq(plainwriteCredentials.projectId, projectId)));
+    .where(
+      and(
+        eq(plainwriteCredentials.tenantId, tenantId),
+        eq(plainwriteCredentials.projectId, projectId),
+      ),
+    );
   const sharedCredential = await getSharedCredentialRow(db, tenantId, projectId);
   await Promise.all(
     [...credentials, ...(sharedCredential ? [{ secretRef: sharedCredential.secretRef }] : [])].map(
@@ -1953,19 +2018,36 @@ export async function hardDeleteProject(projectId: string, formData: FormData) {
 
   await db
     .delete(plainwritePublishEvents)
-    .where(and(eq(plainwritePublishEvents.tenantId, tenantId), eq(plainwritePublishEvents.projectId, projectId)));
+    .where(
+      and(
+        eq(plainwritePublishEvents.tenantId, tenantId),
+        eq(plainwritePublishEvents.projectId, projectId),
+      ),
+    );
   await db
     .delete(plainwriteCollectionSchemas)
-    .where(and(eq(plainwriteCollectionSchemas.tenantId, tenantId), eq(plainwriteCollectionSchemas.projectId, projectId)));
+    .where(
+      and(
+        eq(plainwriteCollectionSchemas.tenantId, tenantId),
+        eq(plainwriteCollectionSchemas.projectId, projectId),
+      ),
+    );
   await db
     .delete(plainwriteDrafts)
     .where(and(eq(plainwriteDrafts.tenantId, tenantId), eq(plainwriteDrafts.projectId, projectId)));
   await db
     .delete(plainwriteFileCache)
-    .where(and(eq(plainwriteFileCache.tenantId, tenantId), eq(plainwriteFileCache.projectId, projectId)));
+    .where(
+      and(eq(plainwriteFileCache.tenantId, tenantId), eq(plainwriteFileCache.projectId, projectId)),
+    );
   await db
     .delete(plainwriteCredentials)
-    .where(and(eq(plainwriteCredentials.tenantId, tenantId), eq(plainwriteCredentials.projectId, projectId)));
+    .where(
+      and(
+        eq(plainwriteCredentials.tenantId, tenantId),
+        eq(plainwriteCredentials.projectId, projectId),
+      ),
+    );
   await db
     .delete(plainwriteProjectCredentials)
     .where(
@@ -1976,7 +2058,12 @@ export async function hardDeleteProject(projectId: string, formData: FormData) {
     );
   await db
     .delete(plainwriteProjectMembers)
-    .where(and(eq(plainwriteProjectMembers.tenantId, tenantId), eq(plainwriteProjectMembers.projectId, projectId)));
+    .where(
+      and(
+        eq(plainwriteProjectMembers.tenantId, tenantId),
+        eq(plainwriteProjectMembers.projectId, projectId),
+      ),
+    );
   await db
     .delete(plainwriteProjects)
     .where(and(eq(plainwriteProjects.tenantId, tenantId), eq(plainwriteProjects.id, projectId)));
@@ -2242,7 +2329,13 @@ async function resolvePersonalCredential(
     return { token: null };
   }
   if (credential.tokenExpiresAt && credential.tokenExpiresAt <= now() + 60) {
-    await markCredentialError(db, tenantId, projectId, userId, 'Credential token expired. Reconnect GitHub.');
+    await markCredentialError(
+      db,
+      tenantId,
+      projectId,
+      userId,
+      'Credential token expired. Reconnect GitHub.',
+    );
     if (credential.connectionId) {
       await sdk.connections
         .markError(credential.connectionId, {
@@ -2268,7 +2361,13 @@ async function resolvePersonalCredential(
     }
     return { token };
   } catch {
-    await markCredentialError(db, tenantId, projectId, userId, 'Credential secret could not be read.');
+    await markCredentialError(
+      db,
+      tenantId,
+      projectId,
+      userId,
+      'Credential secret could not be read.',
+    );
     return { token: null };
   }
 }
@@ -2285,12 +2384,22 @@ async function resolveSharedCredential(
   try {
     const token = await sdk.secrets.get(shared.secretRef);
     if (!token) {
-      await markSharedCredentialError(db, tenantId, projectId, 'The shared connection secret is missing.');
+      await markSharedCredentialError(
+        db,
+        tenantId,
+        projectId,
+        'The shared connection secret is missing.',
+      );
       return null;
     }
     return token;
   } catch {
-    await markSharedCredentialError(db, tenantId, projectId, 'The shared connection secret could not be read.');
+    await markSharedCredentialError(
+      db,
+      tenantId,
+      projectId,
+      'The shared connection secret could not be read.',
+    );
     return null;
   }
 }
@@ -2394,7 +2503,10 @@ async function refreshProjectContentCache(
   await db
     .delete(plainwriteFileCache)
     .where(
-      and(eq(plainwriteFileCache.tenantId, tenantId), eq(plainwriteFileCache.projectId, project.id)),
+      and(
+        eq(plainwriteFileCache.tenantId, tenantId),
+        eq(plainwriteFileCache.projectId, project.id),
+      ),
     );
 
   if (files.length > 0) {
@@ -2429,7 +2541,15 @@ async function inferMissingCollectionSchemas(
       if (existing?.updatedBy) return;
       if (existing && existing.schemaJson !== '[]') return;
       try {
-        await inferAndUpsertCollectionSchema(db, tenantId, project, token, collection, false, files);
+        await inferAndUpsertCollectionSchema(
+          db,
+          tenantId,
+          project,
+          token,
+          collection,
+          false,
+          files,
+        );
       } catch {
         // Schema inference is best-effort and should not block repository sync.
       }
@@ -2461,9 +2581,7 @@ async function inferAndUpsertCollectionSchema(
           eq(plainwriteFileCache.projectId, project.id),
         ),
       ));
-  const samples = files
-    .filter((file) => (file.collection ?? 'Root') === collection)
-    .slice(0, 5);
+  const samples = files.filter((file) => (file.collection ?? 'Root') === collection).slice(0, 5);
   const contents = (
     await Promise.all(
       samples.map(async (file) => {
@@ -2769,7 +2887,10 @@ async function notifyAndLogPublish(
     .select({ userId: plainwriteProjectMembers.userId })
     .from(plainwriteProjectMembers)
     .where(
-      and(eq(plainwriteProjectMembers.tenantId, tenantId), eq(plainwriteProjectMembers.projectId, project.id)),
+      and(
+        eq(plainwriteProjectMembers.tenantId, tenantId),
+        eq(plainwriteProjectMembers.projectId, project.id),
+      ),
     );
   await Promise.all(
     members
@@ -2788,7 +2909,11 @@ async function notifyAndLogPublish(
 function classifyPublishFailure(error: unknown) {
   const summary = sanitizePublishError(error);
   const lower = summary.toLowerCase();
-  if (lower.includes('conflict') || lower.includes('changed') || lower.includes('no longer exists')) {
+  if (
+    lower.includes('conflict') ||
+    lower.includes('changed') ||
+    lower.includes('no longer exists')
+  ) {
     return { code: 'conflict', summary };
   }
   if (lower.includes('scope') || lower.includes('permission')) {
@@ -2811,15 +2936,15 @@ function sanitizePublishError(error: unknown) {
 function parsePublishedFiles(value: string) {
   try {
     const files = JSON.parse(value);
-    return Array.isArray(files) ? files.filter((file): file is string => typeof file === 'string') : [];
+    return Array.isArray(files)
+      ? files.filter((file): file is string => typeof file === 'string')
+      : [];
   } catch {
     return [];
   }
 }
 
-function normalizeDraftStatus(
-  status: string | undefined,
-): ContentFileSummary['status'] {
+function normalizeDraftStatus(status: string | undefined): ContentFileSummary['status'] {
   if (status === 'draft' || status === 'committed') return status;
   return 'unmodified';
 }

@@ -8,7 +8,12 @@ vi.mock('@sovereignfs/sdk', () => ({
   sdk: {
     auth: { requireSession: vi.fn(async () => ({ user: { id: 'user-1', tenantId: 'tenant-1' } })) },
     db: { getClient: vi.fn(async () => fakeDb) },
-    secrets: { create: vi.fn(), update: vi.fn(), delete: vi.fn(), get: vi.fn(async () => 'test-token') },
+    secrets: {
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn(async () => 'test-token'),
+    },
     connections: { disconnect: vi.fn(), markUsed: vi.fn(), markError: vi.fn() },
     notifications: { send: vi.fn() },
     activity: { log: vi.fn() },
@@ -43,7 +48,8 @@ const fakeDb = {
             return builder;
           },
           limit: async () => {
-            if (tableName === 'plainwrite_project_members') return membershipRow ? [membershipRow] : [];
+            if (tableName === 'plainwrite_project_members')
+              return membershipRow ? [membershipRow] : [];
             if (tableName === 'plainwrite_projects') return projectRow ? [projectRow] : [];
             if (tableName === 'plainwrite_credentials') return credentialRow ? [credentialRow] : [];
             return [];
@@ -131,6 +137,39 @@ describe('uploadProjectImage', () => {
     expect(insertedPublishEvents[0]).toMatchObject({ status: 'success', commitSha: 'commit-1' });
   });
 
+  // `..` survives encodeURIComponent (dots are unreserved) and WHATWG URL
+  // parsing collapses the dot segments before the request is sent, so an
+  // unguarded prefix silently retargeted the write at another repository.
+  // A row persisted before normalizeImageUploadPath stripped traversal can
+  // still hold one, so the assembled path must stay inside the repository.
+  it('contains an upload whose stored image path contains traversal segments', async () => {
+    projectRow = {
+      ...(projectRow as Record<string, unknown>),
+      imageUploadPath: '../../../../repos/attacker/evil/contents',
+    };
+    publishFile.mockResolvedValue({ commitSha: 'commit-1', contentSha: 'blob-1' });
+    const { uploadProjectImage } = await import('../actions');
+    const formData = new FormData();
+    formData.set('image', pngFile());
+
+    const result = await uploadProjectImage('project-1', null, formData);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.path).not.toContain('..');
+    expect(result.path).toBe(`repos/attacker/evil/contents/${result.path.split('/').at(-1) ?? ''}`);
+    // The decisive check: the URL the provider would build no longer walks
+    // out of the project's own repository.
+    const published = publishFile.mock.calls[0]?.[1] as { path: string };
+    const resolved = new URL(
+      `https://api.github.com/repos/acme/site/contents/${published.path
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/')}`,
+    ).pathname;
+    expect(resolved.startsWith('/repos/acme/site/contents/')).toBe(true);
+  });
+
   it('rejects an unsupported file type without calling the provider', async () => {
     const { uploadProjectImage } = await import('../actions');
     const formData = new FormData();
@@ -170,7 +209,9 @@ describe('uploadProjectImage', () => {
 
   it('records a failed publish event and returns the classified error on provider failure', async () => {
     const { GitProviderError } = await import('../git-providers');
-    publishFile.mockRejectedValue(new GitProviderError('GitHub rejected the publish request for this branch or file.', 422));
+    publishFile.mockRejectedValue(
+      new GitProviderError('GitHub rejected the publish request for this branch or file.', 422),
+    );
     const { uploadProjectImage } = await import('../actions');
     const formData = new FormData();
     formData.set('image', pngFile());

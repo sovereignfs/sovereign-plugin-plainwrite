@@ -50,7 +50,7 @@ export function isSsgType(value: string): value is SsgType {
 export function normalizePathPrefix(value: string): string {
   const trimmed = value.trim().replace(/^\/+|\/+$/g, '');
   if (trimmed === '.') return '';
-  return trimmed || 'src/content';
+  return dropTraversalSegments(trimmed) || 'src/content';
 }
 
 /** No `.`-root convention here (unlike `normalizePathPrefix`) — an image
@@ -58,7 +58,31 @@ export function normalizePathPrefix(value: string): string {
  * top-level files, so root isn't a meaningful choice for it. */
 export function normalizeImageUploadPath(value: string): string {
   const trimmed = value.trim().replace(/^\/+|\/+$/g, '');
-  return trimmed || 'public/images';
+  return dropTraversalSegments(trimmed) || 'public/images';
+}
+
+/**
+ * Strips `.` and `..` segments (and empty ones left by doubled slashes) from
+ * a repository-relative directory path.
+ *
+ * These paths are interpolated into a GitHub contents API URL, and `..`
+ * survives `encodeURIComponent` untouched — dots are unreserved. WHATWG URL
+ * parsing then resolves the dot segments before the request is sent, so a
+ * stored prefix of `../../../../repos/other/repo/contents` silently retargets
+ * the write at a different repository entirely. Normalizing here means such a
+ * value can never reach the database; `assertSafeRepositoryPath` in actions.ts
+ * independently re-checks the assembled path at every write site.
+ *
+ * Dropped rather than rejected because the callers are plain form actions
+ * with no inline-error channel — the settings field visibly shows the
+ * normalized value afterward, whereas a throw would replace the whole page
+ * via the error boundary.
+ */
+function dropTraversalSegments(value: string): string {
+  return value
+    .split('/')
+    .filter((segment) => segment !== '' && segment !== '.' && segment !== '..')
+    .join('/');
 }
 
 export function defaultMetadataVisibility(isPrivate: boolean): MetadataVisibility {
