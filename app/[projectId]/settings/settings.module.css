@@ -59,6 +59,7 @@
   padding: var(--sv-space-1);
   list-style: none;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-1);
   border: 1px solid var(--sv-color-border);
   border-radius: var(--sv-radius-md);
@@ -102,6 +103,7 @@
 .schemaCard,
 .schemaFields {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-4);
 }
 
@@ -112,9 +114,24 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* A flex item's default min-width is auto, so this identity block refuses to
+   shrink below its content's intrinsic width and pushes the whole row past
+   the viewport. Measured at a 375px viewport: a member whose name or email
+   has no break opportunity overflowed by 367px before this, and by 0 after.
+   A long email local-part is the realistic trigger — note a raw user ID is
+   not, since a UUID's hyphens are themselves break opportunities. */
+.memberIdentity {
+  min-width: 0;
+}
+
 .member p {
   color: var(--sv-color-text-secondary);
   font-size: var(--sv-font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.member strong {
+  overflow-wrap: anywhere;
 }
 
 .credentialDetails {
@@ -126,6 +143,7 @@
 
 .credentialDetails div {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-1);
 }
 
@@ -147,6 +165,7 @@
 
 .eventList {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   border: 1px solid var(--sv-color-border);
   border-radius: var(--sv-radius-md);
   overflow: hidden;
@@ -176,6 +195,7 @@
 .eventMeta {
   align-items: flex-end;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-2);
   justify-items: end;
   color: var(--sv-color-text-secondary);

@@ -86,11 +86,13 @@
 
 .collections {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-4);
 }
 
 .collection {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sv-space-2);
 }
 
@@ -102,6 +104,7 @@
 
 .fileList {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   border: 1px solid var(--sv-color-border);
   border-radius: var(--sv-radius-md);
   overflow: hidden;

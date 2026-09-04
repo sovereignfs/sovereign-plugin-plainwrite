@@ -432,7 +432,7 @@ export default async function ProjectSettingsPage({ params }: SettingsPageProps)
         <div className={styles.members}>
           {project.members.map((member) => (
             <div key={member.userId} className={styles.member}>
-              <div>
+              <div className={styles.memberIdentity}>
                 <strong>{member.displayName ?? member.email ?? member.userId}</strong>
                 <p>{member.email ?? member.userId}</p>
               </div>
