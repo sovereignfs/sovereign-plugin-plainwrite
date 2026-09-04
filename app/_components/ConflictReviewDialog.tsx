@@ -68,7 +68,9 @@ export function ConflictReviewDialog({
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setLoadError(error instanceof Error ? error.message : "Couldn't load the site's version.");
+          setLoadError(
+            error instanceof Error ? error.message : "Couldn't load the site's version.",
+          );
         }
       })
       .finally(() => {
@@ -83,10 +85,21 @@ export function ConflictReviewDialog({
     if (refreshState?.ok || forceState?.ok) onClose();
   }, [refreshState, forceState, onClose]);
 
-  const localBody = comparison ? parseMarkdownDocument(comparison.localContent).body : '';
-  const remoteBody = comparison?.remoteContent ? parseMarkdownDocument(comparison.remoteContent).body : '';
-  const diff = comparison && !comparison.remoteMissing ? diffParagraphs(localBody, remoteBody) : null;
+  const localDocument = comparison ? parseMarkdownDocument(comparison.localContent) : null;
+  const remoteDocument = comparison?.remoteContent
+    ? parseMarkdownDocument(comparison.remoteContent)
+    : null;
+  const diff =
+    comparison && !comparison.remoteMissing
+      ? diffParagraphs(localDocument?.body ?? '', remoteDocument?.body ?? '')
+      : null;
   const changedCount = diff?.local.filter((p) => p.changed).length ?? 0;
+  // A conflict is a whole-file mismatch, but the two columns below only
+  // compare body paragraphs. Without this, a remote edit that touched only
+  // the post's details showed "no differences" — reading as safe to
+  // overwrite — and "Publish mine anyway" then discarded it silently.
+  const detailsDiffer =
+    diff !== null && localDocument?.frontmatterYaml !== remoteDocument?.frontmatterYaml;
 
   return (
     <Dialog
@@ -104,7 +117,9 @@ export function ConflictReviewDialog({
         ) : null}
 
         {comparison?.remoteMissing ? (
-          <p className={styles.hint}>This post was removed from the site since you started editing.</p>
+          <p className={styles.hint}>
+            This post was removed from the site since you started editing.
+          </p>
         ) : null}
 
         {diff ? (
@@ -135,9 +150,16 @@ export function ConflictReviewDialog({
             </div>
             <p className={styles.hint}>
               {changedCount > 0
-                ? `${changedCount} ${changedCount === 1 ? 'paragraph differs' : 'paragraphs differ'}`
-                : 'No paragraph-level differences found in the body text.'}
+                ? `${changedCount} ${changedCount === 1 ? 'paragraph differs' : 'paragraphs differ'} in the writing above.`
+                : 'The writing above is the same in both versions.'}
             </p>
+            {detailsDiffer ? (
+              <p className={styles.hint}>
+                The post&apos;s details (title, date, tags and so on) also differ between the two
+                versions. Those aren&apos;t shown side by side above — publishing yours will replace
+                the site&apos;s.
+              </p>
+            ) : null}
           </>
         ) : null}
 
