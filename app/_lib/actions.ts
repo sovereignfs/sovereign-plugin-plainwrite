@@ -312,6 +312,23 @@ async function requireProjectRole(
  * is deliberately outside the content path prefix and so cannot use the
  * adapter check — still gets the same traversal guard.
  */
+/**
+ * Tombstones a vault reference whose secret has just been deleted.
+ *
+ * `secret_ref` is NOT NULL on both credential tables, so a disconnected
+ * credential cannot simply drop the column — it has to record that the
+ * reference is spent. Every read site already guards on this `revoked:`
+ * prefix; without a writer, those guards never fired and a disconnected
+ * credential kept a `secretRef` pointing at a soft-deleted vault row.
+ * Reconnecting then called `sdk.secrets.update()` on it, which throws
+ * "Plugin secret not found." because the platform filters deleted rows.
+ *
+ * Idempotent, so disconnecting twice cannot stack the prefix.
+ */
+function revokedSecretRef(secretRef: string): string {
+  return secretRef.startsWith('revoked:') ? secretRef : `revoked:${secretRef}`;
+}
+
 function assertSafeRepositoryPath(path: string) {
   const segments = path.split('/');
   const hasTraversal = segments.some(
@@ -1697,6 +1714,10 @@ export async function disconnectGitHubCredential(projectId: string) {
     .update(plainwriteCredentials)
     .set({
       status: 'disconnected',
+      // The vault secret is gone (soft-deleted) by this point, so the stored
+      // reference must be tombstoned too — otherwise reconnecting reuses it
+      // and sdk.secrets.update() throws on the deleted row.
+      secretRef: revokedSecretRef(existing.secretRef),
       lastError: null,
       updatedAt: now(),
     })
@@ -1798,6 +1819,9 @@ export async function disconnectSharedGitHubCredential(projectId: string) {
     .update(plainwriteProjectCredentials)
     .set({
       status: 'disconnected',
+      // See disconnectGitHubCredential — the same tombstone, for the
+      // owner-managed shared credential.
+      secretRef: revokedSecretRef(existing.secretRef),
       lastError: null,
       updatedAt: now(),
     })

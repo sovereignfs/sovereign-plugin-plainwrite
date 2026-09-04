@@ -53,7 +53,8 @@ const fakeDb = {
             return this;
           },
           limit: async () => {
-            if (tableName === 'plainwrite_project_members') return membershipRow ? [membershipRow] : [];
+            if (tableName === 'plainwrite_project_members')
+              return membershipRow ? [membershipRow] : [];
             if (tableName === 'plainwrite_projects') return projectRow ? [projectRow] : [];
             if (tableName === 'plainwrite_credentials') return credentialRow ? [credentialRow] : [];
             return [];
@@ -240,5 +241,115 @@ describe('disconnectGitHubCredential — tolerates a missing vault entry', () =>
     await expect(disconnectGitHubCredential('project-1')).resolves.toBeUndefined();
     expect(updatedCredentials).toHaveLength(1);
     expect(updatedCredentials[0]?.status).toBe('disconnected');
+  });
+
+  it('tombstones the vault reference so it is never reused after the secret is deleted', async () => {
+    credentialRow = {
+      tenantId: 'tenant-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      provider: 'github',
+      authType: 'pat',
+      connectionId: null,
+      secretRef: 'secret-1',
+      tokenExpiresAt: null,
+      providerLogin: 'octocat',
+      status: 'connected',
+      lastError: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    secretsDelete.mockResolvedValue(undefined);
+
+    const { disconnectGitHubCredential } = await import('../actions');
+    await disconnectGitHubCredential('project-1');
+
+    expect(secretsDelete).toHaveBeenCalledWith('secret-1');
+    expect(updatedCredentials[0]?.secretRef).toBe('revoked:secret-1');
+  });
+});
+
+// sdk.secrets.delete() is a soft delete, and getPluginSecret filters
+// `deleted_at IS NULL` — so sdk.secrets.update() on a disconnected
+// credential's stale secretRef throws "Plugin secret not found.".
+// connectGitHubPat does not return an ActionResult, so that throw reached
+// the error boundary and replaced the whole page.
+describe('connectGitHubPat — reconnecting after a disconnect', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    insertedCredentials.length = 0;
+    updatedCredentials.length = 0;
+    membershipRow = { role: 'editor' };
+    projectRow = {
+      id: 'project-1',
+      tenantId: 'tenant-1',
+      repoOwner: 'octo',
+      repoName: 'docs',
+      provider: 'github',
+      branch: 'main',
+      isPrivate: false,
+    };
+    secretsCreate.mockResolvedValue({ id: 'secret-new' });
+    // Mirrors the platform: updating a soft-deleted secret throws.
+    secretsUpdate.mockRejectedValue(new Error('Plugin secret not found.'));
+  });
+
+  it('creates a fresh secret instead of reusing a revoked reference', async () => {
+    credentialRow = {
+      tenantId: 'tenant-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      provider: 'github',
+      authType: 'pat',
+      connectionId: null,
+      secretRef: 'revoked:secret-1',
+      tokenExpiresAt: null,
+      providerLogin: 'octocat',
+      status: 'disconnected',
+      lastError: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    const { connectGitHubPat } = await import('../actions');
+    const formData = new FormData();
+    formData.set('token', 'ghp_reconnected');
+
+    await expect(connectGitHubPat('project-1', formData)).resolves.toBeUndefined();
+
+    expect(secretsUpdate).not.toHaveBeenCalled();
+    expect(secretsCreate).toHaveBeenCalledOnce();
+    expect(updatedCredentials.at(-1)?.secretRef).toBe('secret-new');
+    expect(updatedCredentials.at(-1)?.status).toBe('connected');
+  });
+
+  it('survives a full disconnect then reconnect round trip', async () => {
+    credentialRow = {
+      tenantId: 'tenant-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      provider: 'github',
+      authType: 'pat',
+      connectionId: null,
+      secretRef: 'secret-1',
+      tokenExpiresAt: null,
+      providerLogin: 'octocat',
+      status: 'connected',
+      lastError: null,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    secretsDelete.mockResolvedValue(undefined);
+
+    const { connectGitHubPat, disconnectGitHubCredential } = await import('../actions');
+    await disconnectGitHubCredential('project-1');
+
+    const formData = new FormData();
+    formData.set('token', 'ghp_reconnected');
+    await expect(connectGitHubPat('project-1', formData)).resolves.toBeUndefined();
+
+    expect(secretsUpdate).not.toHaveBeenCalled();
+    expect(secretsCreate).toHaveBeenCalledOnce();
+    expect(updatedCredentials.at(-1)?.secretRef).toBe('secret-new');
   });
 });
