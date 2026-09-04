@@ -8,7 +8,12 @@ vi.mock('@sovereignfs/sdk', () => ({
   sdk: {
     auth: { requireSession: vi.fn(async () => ({ user: { id: 'user-1', tenantId: 'tenant-1' } })) },
     db: { getClient: vi.fn(async () => fakeDb) },
-    secrets: { create: vi.fn(), update: vi.fn(), delete: vi.fn(), get: vi.fn(async () => 'test-token') },
+    secrets: {
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      get: vi.fn(async () => 'test-token'),
+    },
     connections: { disconnect: vi.fn() },
     notifications: { send: vi.fn() },
     activity: { log: vi.fn() },
@@ -47,7 +52,8 @@ const fakeDb = {
             return builder;
           },
           limit: async () => {
-            if (tableName === 'plainwrite_project_members') return membershipRow ? [membershipRow] : [];
+            if (tableName === 'plainwrite_project_members')
+              return membershipRow ? [membershipRow] : [];
             if (tableName === 'plainwrite_projects') return projectRow ? [projectRow] : [];
             if (tableName === 'plainwrite_credentials') return credentialRow ? [credentialRow] : [];
             if (tableName === 'plainwrite_drafts') return draftRow ? [draftRow] : [];
@@ -140,7 +146,10 @@ beforeEach(() => {
 
 describe('getConflictComparison', () => {
   it('returns both versions when the remote file exists', async () => {
-    getFileContent.mockResolvedValue({ content: '---\ntitle: Remote\n---\n\nRemote body.', sha: 'fresh-sha' });
+    getFileContent.mockResolvedValue({
+      content: '---\ntitle: Remote\n---\n\nRemote body.',
+      sha: 'fresh-sha',
+    });
     const { getConflictComparison } = await import('../actions');
 
     const result = await getConflictComparison('project-1', PATH);
@@ -170,7 +179,9 @@ describe('getConflictComparison', () => {
     draftRow = null;
     const { getConflictComparison } = await import('../actions');
 
-    await expect(getConflictComparison('project-1', PATH)).rejects.toThrow('No local draft to compare.');
+    await expect(getConflictComparison('project-1', PATH)).rejects.toThrow(
+      'No local draft to compare.',
+    );
   });
 });
 
@@ -249,6 +260,53 @@ describe('publishCommittedDraft — conflict detection and force override', () =
       expect.objectContaining({ baseSha: 'new-remote-sha' }),
       expect.anything(),
     );
+  });
+
+  // The non-force conflict check classifies "no such file" off
+  // GitProviderError.notFound. It previously matched on the sanitized
+  // message text instead, which is user-facing copy with no contract — and
+  // case-sensitively, so this very mock ('Not found') would not have matched
+  // it. Neither branch below had any coverage.
+  it('publishes a brand-new file when the site has nothing at that path', async () => {
+    const { GitProviderError } = await import('../git-providers');
+    draftRow = { ...(draftRow as Record<string, unknown>), baseSha: null };
+    getFileContent.mockRejectedValue(new GitProviderError('Not found', 404));
+    publishFile.mockResolvedValue({ commitSha: 'commit-1', contentSha: 'new-content-sha' });
+    const { publishCommittedDraft } = await import('../actions');
+
+    const result = await publishCommittedDraft('project-1', PATH, null, new FormData());
+
+    expect(result).toEqual({ ok: true });
+    expect(publishFile).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ baseSha: null }),
+      expect.anything(),
+    );
+  });
+
+  it('reports a conflict when the file the draft was opened from has been deleted', async () => {
+    const { GitProviderError } = await import('../git-providers');
+    getFileContent.mockRejectedValue(new GitProviderError('Not found', 404));
+    const { publishCommittedDraft } = await import('../actions');
+
+    const result = await publishCommittedDraft('project-1', PATH, null, new FormData());
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('no longer exists');
+    expect(publishFile).not.toHaveBeenCalled();
+  });
+
+  it('does not swallow a non-404 provider failure as a missing file', async () => {
+    const { GitProviderError } = await import('../git-providers');
+    getFileContent.mockRejectedValue(
+      new GitProviderError('GitHub token is missing repository permissions.', 403),
+    );
+    const { publishCommittedDraft } = await import('../actions');
+
+    const result = await publishCommittedDraft('project-1', PATH, null, new FormData());
+
+    expect(result.ok).toBe(false);
+    expect(publishFile).not.toHaveBeenCalled();
   });
 
   it('force publish treats a since-deleted remote file as a fresh create (null base sha)', async () => {

@@ -31,6 +31,7 @@ import {
   detectGitHubRepository,
   detectGitHubRepositoryFiles,
   getGitProvider,
+  type GitFileContent,
   GitProviderError,
   type GitPublishResult,
 } from './git-providers';
@@ -2780,22 +2781,31 @@ async function assertNoPublishConflict(
     throw new Error('Cannot publish a delete without a remote base revision.');
   }
 
+  // Only the provider call is guarded. Deciding the conflict outside the
+  // try means those throws can never be caught and re-inspected here, which
+  // is what forced the previous version to re-classify its own errors by
+  // matching on message text.
+  let remote: GitFileContent;
   try {
-    const remote = await provider.getFileContent(project, path, { token });
-    if (!draft.baseSha) {
-      throw new Error('Conflict: remote file already exists.');
-    }
-    if (remote.sha !== draft.baseSha) {
-      throw new Error('Conflict: remote file changed since this draft was opened.');
-    }
+    remote = await provider.getFileContent(project, path, { token });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.startsWith('Conflict:')) throw error;
-    if (message.includes('not found') || message.includes('not access it')) {
+    // The typed flag, not the human-readable message: `sanitizeGitHubError`
+    // produces user-facing copy that has been reworded before and carries no
+    // contract. Matching on it also silently depended on its exact casing.
+    if (error instanceof GitProviderError && error.notFound) {
+      // Nothing on the site at this path. Expected for a brand-new post;
+      // a conflict for a draft opened from a file that has since been deleted.
       if (draft.baseSha) throw new Error('Conflict: remote file no longer exists.');
       return;
     }
     throw error;
+  }
+
+  if (!draft.baseSha) {
+    throw new Error('Conflict: remote file already exists.');
+  }
+  if (remote.sha !== draft.baseSha) {
+    throw new Error('Conflict: remote file changed since this draft was opened.');
   }
 }
 
