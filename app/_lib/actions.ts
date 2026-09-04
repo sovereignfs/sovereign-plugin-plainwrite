@@ -888,7 +888,12 @@ export async function getEditorState(
     // "new file" — that would let a transient failure masquerade as an empty
     // file, and a subsequent save+publish would overwrite the real remote
     // content with placeholder text (see class doc on EditorState.loadError).
-    const message = error instanceof Error ? error.message : 'Could not load the remote file.';
+    // Through the same redaction every other error-surfacing path uses.
+    // Provider errors are canned, status-keyed strings today, so nothing
+    // leaks — but this was the one place returning a raw message, and the
+    // net costs nothing if that ever stops being true.
+    const message =
+      error instanceof Error ? sanitizePublishError(error) : 'Could not load the remote file.';
     return {
       project,
       path,
