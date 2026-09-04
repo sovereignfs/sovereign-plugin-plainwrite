@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Button, Dialog, FormField, Input } from '@sovereignfs/ui';
 import { createContentFile } from '../_lib/actions';
 import { ConfirmDialog } from './ConfirmDialog';
+import { SubmitButton } from './SubmitButton';
 import styles from './NewPostDialog.module.css';
 
 function slugify(value: string) {
@@ -156,9 +157,7 @@ export function NewPostDialog({ projectId, sections }: { projectId: string; sect
             <Button type="button" variant="secondary" onClick={handleDismissRequest}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!title.trim()}>
-              Start writing
-            </Button>
+            <SubmitButton disabled={!title.trim()}>Start writing</SubmitButton>
           </div>
         </form>
       </Dialog>

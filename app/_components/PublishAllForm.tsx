@@ -54,7 +54,11 @@ export function PublishAllForm({
             ))}
           </ul>
           <form action={formAction} className={styles.form}>
-            <FormCheckbox name="skipConflicts" label="Skip posts that changed on the site" />
+            <FormCheckbox
+              name="skipConflicts"
+              label="Skip posts that changed on the site"
+              disabled={pending}
+            />
             {state && !state.ok ? (
               <p className={styles.feedbackError} role="status" aria-live="polite">
                 {state.error}
@@ -71,7 +75,9 @@ export function PublishAllForm({
           </form>
         </div>
       </Dialog>
-      {state && state.ok && state.message ? <p className={styles.successNote}>{state.message}</p> : null}
+      {state && state.ok && state.message ? (
+        <p className={styles.successNote}>{state.message}</p>
+      ) : null}
     </div>
   );
 }

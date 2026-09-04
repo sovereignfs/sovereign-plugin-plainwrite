@@ -74,6 +74,7 @@ export function InviteMemberForm({
               }}
               placeholder="Search by name or email"
               autoComplete="off"
+              disabled={pending}
             />
             {results.length > 0 && !selected ? (
               <ul className={styles.memberResults}>
@@ -98,7 +99,7 @@ export function InviteMemberForm({
       </FormField>
       <FormField label="Role">
         {(field) => (
-          <Select {...field} name="role" defaultValue="viewer">
+          <Select {...field} name="role" defaultValue="viewer" disabled={pending}>
             <option value="viewer">Reader</option>
             <option value="editor">Writer</option>
             <option value="owner">Owner</option>

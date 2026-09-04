@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Button, Checkbox, Dialog, FormField, Input, Select, Textarea } from '@sovereignfs/ui';
 import { createProject, detectRepository, type RepositoryDetectionResult } from '../_lib/actions';
 import { ConfirmDialog } from './ConfirmDialog';
+import { SubmitButton } from './SubmitButton';
 import styles from './NewProjectDialog.module.css';
 
 function humanizeRepoName(slug: string) {
@@ -98,9 +99,16 @@ export function NewProjectDialog() {
           <div className={styles.form}>
             <div className={styles.header}>
               <h2>Where does your site live?</h2>
-              <p>Paste the GitHub address of your site&apos;s code. We&apos;ll look inside and suggest the rest.</p>
+              <p>
+                Paste the GitHub address of your site&apos;s code. We&apos;ll look inside and
+                suggest the rest.
+              </p>
             </div>
-            <FormField label="Site address" required hint="Supports GitHub HTTPS and SSH repository URLs.">
+            <FormField
+              label="Site address"
+              required
+              hint="Supports GitHub HTTPS and SSH repository URLs."
+            >
               {(field) => (
                 <Input
                   {...field}
@@ -129,7 +137,11 @@ export function NewProjectDialog() {
                   Continue manually
                 </Button>
               ) : null}
-              <Button type="button" disabled={!repositoryUrl.trim() || detecting} onClick={runDetection}>
+              <Button
+                type="button"
+                disabled={!repositoryUrl.trim() || detecting}
+                onClick={runDetection}
+              >
                 {detecting ? 'Looking…' : 'Continue'}
               </Button>
             </div>
@@ -146,10 +158,13 @@ export function NewProjectDialog() {
               {detection?.ok ? (
                 <p className={styles.detectionNote}>
                   Found it — {detection.postCount} post{detection.postCount === 1 ? '' : 's'} in{' '}
-                  <code>{detection.pathPrefix}</code>. We&apos;ve filled these in; change anything you need to.
+                  <code>{detection.pathPrefix}</code>. We&apos;ve filled these in; change anything
+                  you need to.
                 </p>
               ) : (
-                <p>Point Plainwrite at the GitHub repository that stores your site&apos;s content.</p>
+                <p>
+                  Point Plainwrite at the GitHub repository that stores your site&apos;s content.
+                </p>
               )}
             </div>
             <input type="hidden" name="repositoryUrl" value={repositoryUrl} />
@@ -187,7 +202,10 @@ export function NewProjectDialog() {
                   />
                 )}
               </FormField>
-              <FormField label="Content folder" hint="Use . if your posts live at the repository root.">
+              <FormField
+                label="Content folder"
+                hint="Use . if your posts live at the repository root."
+              >
                 {(field) => (
                   <Input
                     {...field}
@@ -218,7 +236,12 @@ export function NewProjectDialog() {
                 </Select>
               )}
             </FormField>
-            <Checkbox name="isPrivate" checked={isPrivate} onChange={setIsPrivate} label="Private site" />
+            <Checkbox
+              name="isPrivate"
+              checked={isPrivate}
+              onChange={setIsPrivate}
+              label="Private site"
+            />
             <div className={styles.actions}>
               <Button type="button" variant="secondary" onClick={() => setStep('detect')}>
                 Back
@@ -226,7 +249,7 @@ export function NewProjectDialog() {
               <Button type="button" variant="secondary" onClick={handleDismissRequest}>
                 Cancel
               </Button>
-              <Button type="submit">Connect site</Button>
+              <SubmitButton>Connect site</SubmitButton>
             </div>
           </form>
         )}
