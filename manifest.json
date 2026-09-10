@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "fs.sovereign.plainwrite",
   "name": "Plainwrite",
-  "version": "0.18.7",
+  "version": "0.18.8",
   "description": "A git-backed content editor for static site generators.",
   "type": "sovereign",
   "runtime": "native",
@@ -43,7 +43,10 @@
         "id": "git.github",
         "title": "GitHub",
         "callbackPath": "/oauth/github/callback",
-        "scopes": ["repo", "read:user"],
+        "scopes": [
+          "repo",
+          "read:user"
+        ],
         "config": {
           "public": {
             "clientId": {
